@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
 
@@ -71,7 +72,7 @@ func main() {
 		log.Printf("Indexed %d emails (%d errors)", total, errCount)
 		if vecStore != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			vTotal, _, vErr := vecStore.IndexEmails(ctx, emailDir, index.WalkEmails)
+			vTotal, _, vErr := vecStore.IndexEmails(ctx, emailDir, index.WalkEmails, nil)
 			cancel()
 			if vErr != nil {
 				log.Printf("WARN: vector index: %v", vErr)
@@ -206,12 +207,14 @@ func runStats(idx *index.Index) {
 
 func runServer(idx *index.Index, vecStore *vector.Store, addr string) {
 	mux := http.NewServeMux()
+	reindexState := &reindexProgress{}
 
 	// API endpoints.
 	mux.HandleFunc("GET /api/search", handleSearch(idx, vecStore))
 	mux.HandleFunc("GET /api/email", handleEmail(idx))
 	mux.HandleFunc("GET /api/stats", handleStats(idx, vecStore))
-	mux.HandleFunc("POST /api/reindex", handleReindex(idx, vecStore))
+	mux.HandleFunc("POST /api/reindex", handleReindex(idx, vecStore, reindexState))
+	mux.HandleFunc("GET /api/reindex/status", handleReindexStatus(reindexState))
 	mux.HandleFunc("GET /health", handleHealth(idx))
 
 	// Sync proxy endpoints (forwarded to mail-sync container).
@@ -311,38 +314,110 @@ func handleStats(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 	}
 }
 
-func handleReindex(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
+// reindexProgress holds state for background reindex; safe for concurrent access.
+type reindexProgress struct {
+	mu           sync.RWMutex
+	Running      bool    `json:"running"`
+	Phase        string  `json:"phase"` // "parquet", "vector"
+	ParquetTotal int     `json:"parquet_total"`
+	VecIndexed   int     `json:"vec_indexed"`
+	VecTotal     int     `json:"vec_total"`
+	Error        string  `json:"error,omitempty"`
+	Indexed      int     `json:"indexed"`
+	Errors       int     `json:"errors"`
+	ParquetSecs  float64 `json:"parquet_secs"`
+	VectorSecs   float64 `json:"vector_secs"`
+	TotalSecs    float64 `json:"total_secs"`
+}
+
+func handleReindex(idx *index.Index, vecStore *vector.Store, state *reindexProgress) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		total, errCount := idx.Build()
-		parquetSecs := time.Since(start).Seconds()
-		log.Printf("Parquet index: %d emails in %.1fs (%.1f emails/sec)", total, parquetSecs, float64(total)/parquetSecs)
-
-		vecIndexed := 0
-		var vectorSecs float64
-		if vecStore != nil {
-			vecStart := time.Now()
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-			defer cancel()
-			vTotal, _, vErr := vecStore.IndexEmails(ctx, idx.EmailDir(), index.WalkEmails)
-			vectorSecs = time.Since(vecStart).Seconds()
-			if vErr != nil {
-				log.Printf("WARN: vector reindex: %v", vErr)
-			} else {
-				vecIndexed = vTotal
-			}
+		state.mu.Lock()
+		if state.Running {
+			state.mu.Unlock()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "reindex already in progress"})
+			return
 		}
+		state.Running = true
+		state.Phase = "parquet"
+		state.ParquetTotal = 0
+		state.VecIndexed = 0
+		state.VecTotal = 0
+		state.Error = ""
+		state.mu.Unlock()
 
-		totalSecs := time.Since(start).Seconds()
-		writeJSON(w, http.StatusOK, map[string]any{
-			"indexed":       total,
-			"errors":        errCount,
-			"vec_indexed":  vecIndexed,
-			"parquet_secs": parquetSecs,
-			"vector_secs":  vectorSecs,
-			"total_secs":   totalSecs,
-		})
+		writeJSON(w, http.StatusAccepted, map[string]any{"status": "started"})
+
+		go func() {
+			start := time.Now()
+			var total, errCount int
+			var vecIndexed int
+			var parquetSecs, vectorSecs float64
+
+			defer func() {
+				state.mu.Lock()
+				state.Running = false
+				state.Phase = ""
+				state.Indexed = total
+				state.VecIndexed = vecIndexed
+				state.Errors = errCount
+				state.ParquetSecs = parquetSecs
+				state.VectorSecs = vectorSecs
+				state.TotalSecs = time.Since(start).Seconds()
+				state.mu.Unlock()
+			}()
+
+			total, errCount = idx.Build()
+			parquetSecs = time.Since(start).Seconds()
+			state.mu.Lock()
+			state.ParquetTotal = total
+			state.Phase = "vector"
+			state.mu.Unlock()
+			log.Printf("Parquet index: %d emails in %.1fs (%.1f emails/sec)", total, parquetSecs, float64(total)/parquetSecs)
+
+			if vecStore != nil {
+				vecStart := time.Now()
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+				defer cancel()
+				progress := func(indexed, total int) {
+					state.mu.Lock()
+					state.VecIndexed = indexed
+					state.VecTotal = total
+					state.mu.Unlock()
+				}
+				vTotal, _, vErr := vecStore.IndexEmails(ctx, idx.EmailDir(), index.WalkEmails, progress)
+				vectorSecs = time.Since(vecStart).Seconds()
+				if vErr != nil {
+					log.Printf("WARN: vector reindex: %v", vErr)
+					state.mu.Lock()
+					state.Error = vErr.Error()
+					state.mu.Unlock()
+				} else {
+					vecIndexed = vTotal
+				}
+			}
+		}()
+	}
+}
+
+func handleReindexStatus(state *reindexProgress) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		state.mu.RLock()
+		out := map[string]any{
+			"running":       state.Running,
+			"phase":         state.Phase,
+			"parquet_total": state.ParquetTotal,
+			"vec_indexed":   state.VecIndexed,
+			"vec_total":     state.VecTotal,
+			"error":         state.Error,
+			"indexed":       state.Indexed,
+			"errors":        state.Errors,
+			"parquet_secs":  state.ParquetSecs,
+			"vector_secs":   state.VectorSecs,
+			"total_secs":    state.TotalSecs,
+		}
+		state.mu.RUnlock()
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
@@ -599,6 +674,20 @@ const uiHTML = `<!DOCTYPE html>
     display: none;
   }
   .sync-dd-footer.visible { display: block; }
+  .reindex-progress-wrap {
+    margin-top: 0.75rem; padding: 0.5rem 0.75rem;
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: var(--radius); font-size: 0.82rem; color: var(--text-dim);
+  }
+  .reindex-progress-wrap .reindex-progress-bar { margin-top: 0.35rem; }
+  .reindex-progress-bar {
+    height: 4px; background: var(--surface-2); border-radius: 2px;
+    overflow: hidden; margin-top: 0.35rem;
+  }
+  .reindex-progress-bar .fill {
+    display: block; height: 100%; background: var(--accent);
+    border-radius: 2px; transition: width 0.2s;
+  }
 
   /* --- Detail view --- */
   .detail-container { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
@@ -703,6 +792,10 @@ const uiHTML = `<!DOCTYPE html>
         </span>
         <button class="btn-sm" id="reindex-btn">Reindex</button>
       </div>
+      <div id="reindex-progress" class="reindex-progress-wrap" style="display:none">
+        <span id="reindex-progress-text"></span>
+        <div class="reindex-progress-bar"><div class="fill" id="reindex-progress-fill" style="width:0%"></div></div>
+      </div>
       <div id="results" class="results"></div>
       <div id="pager" class="pager"></div>
     </div>
@@ -728,6 +821,9 @@ const uiHTML = `<!DOCTYPE html>
   var totalPill = document.getElementById('total-pill');
   var indexInfo = document.getElementById('index-info');
   var reindexBtn = document.getElementById('reindex-btn');
+  var reindexProgress = document.getElementById('reindex-progress');
+  var reindexProgressText = document.getElementById('reindex-progress-text');
+  var reindexProgressFill = document.getElementById('reindex-progress-fill');
   var searchView = document.getElementById('search-view');
   var detailView = document.getElementById('detail-view');
   var detailContent = document.getElementById('detail-content');
@@ -1152,13 +1248,59 @@ const uiHTML = `<!DOCTYPE html>
         syncPollTimer = null;
         syncFooter.textContent = 'Reindexing...';
         syncFooter.classList.add('visible');
-        await fetch('/api/reindex', {method:'POST'});
-        await loadStats();
-        await doSearch(currentQuery, currentOffset);
+        await runReindexWithProgress();
         syncFooter.textContent = 'Done! Index refreshed.';
         setTimeout(function() { syncFooter.classList.remove('visible'); }, 3000);
       }
     } catch(e) {}
+  }
+
+  async function runReindexWithProgress() {
+    var r = await fetch('/api/reindex', {method:'POST'});
+    if (r.status === 409) {
+      // Already running, just poll to show progress
+    } else if (r.status !== 202) {
+      reindexProgress.style.display = 'none';
+      return;
+    }
+    reindexProgress.style.display = 'block';
+    reindexProgressText.textContent = 'Starting...';
+    reindexProgressFill.style.width = '0%';
+
+    var poll = setInterval(async function() {
+      try {
+        var s = await fetch('/api/reindex/status');
+        var d = await s.json();
+        if (d.phase === 'parquet') {
+          reindexProgressText.textContent = 'Building keyword index...';
+          reindexProgressFill.style.width = '5%';
+        } else if (d.phase === 'vector' && d.vec_total > 0) {
+          var pct = Math.round((d.vec_indexed / d.vec_total) * 95) + 5;
+          reindexProgressText.textContent = 'Indexing vectors: ' + d.vec_indexed.toLocaleString() + ' / ' + d.vec_total.toLocaleString();
+          reindexProgressFill.style.width = pct + '%';
+        } else if (d.phase === 'vector') {
+          reindexProgressText.textContent = 'Preparing vector index...';
+          reindexProgressFill.style.width = '5%';
+        }
+        if (!d.running) {
+          clearInterval(poll);
+          reindexProgressFill.style.width = '100%';
+          if (d.error) {
+            reindexProgressText.textContent = 'Error: ' + d.error;
+          } else {
+            var totalMsg = (d.indexed || 0).toLocaleString() + ' emails';
+          if (d.vec_indexed > 0) totalMsg += ' (' + d.vec_indexed.toLocaleString() + ' vectors)';
+          reindexProgressText.textContent = 'Done! Indexed ' + totalMsg;
+          }
+          await loadStats();
+          currentOffset = 0;
+          await doSearch(qInput.value, 0);
+          setTimeout(function() {
+            reindexProgress.style.display = 'none';
+          }, 3000);
+        }
+      } catch(e) {}
+    }, 1500);
   }
 
   function timeSince(epochSeconds) {
@@ -1198,13 +1340,12 @@ const uiHTML = `<!DOCTYPE html>
   if (modeKeyword) modeKeyword.classList.add('active');
 
   reindexBtn.addEventListener('click', async function() {
+    reindexBtn.disabled = true;
     reindexBtn.innerHTML = '<span class="spinner"></span>';
     try {
-      await fetch('/api/reindex', {method:'POST'});
-      await loadStats();
-      currentOffset = 0;
-      await doSearch(qInput.value, 0);
+      await runReindexWithProgress();
     } finally {
+      reindexBtn.disabled = false;
       reindexBtn.textContent = 'Reindex';
     }
   });

@@ -283,5 +283,6 @@ mails/
 
 ## Development
 
-See [TODO.md](TODO.md) for current status and open tasks.
-See [AGENTS.md](AGENTS.md) for architecture decisions and coding guidelines.
+- [TODO.md](TODO.md) — current status and open tasks
+- [AGENTS.md](AGENTS.md) — architecture decisions and coding guidelines
+- [CONTRIBUTING.md](CONTRIBUTING.md) — API examples, Qdrant verification, similarity search

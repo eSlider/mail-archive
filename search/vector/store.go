@@ -183,8 +183,11 @@ func (s *Store) RecreateCollection(ctx context.Context) error {
 // WalkEmailsFn is a function that walks an email directory and returns parsed emails.
 type WalkEmailsFn func(emailDir string) ([]eml.Email, int)
 
+// IndexProgressFunc is called during indexing with (indexed, total). Pass nil to skip.
+type IndexProgressFunc func(indexed, total int)
+
 // IndexEmails parses emails from the directory and indexes them into Qdrant.
-func (s *Store) IndexEmails(ctx context.Context, emailDir string, walkFn WalkEmailsFn) (int, int, error) {
+func (s *Store) IndexEmails(ctx context.Context, emailDir string, walkFn WalkEmailsFn, progress IndexProgressFunc) (int, int, error) {
 	emails, errCount := walkFn(emailDir)
 	if len(emails) == 0 {
 		return 0, errCount, nil
@@ -241,6 +244,9 @@ func (s *Store) IndexEmails(ctx context.Context, emailDir string, walkFn WalkEma
 			return totalIndexed, errCount, err
 		}
 		totalIndexed += len(chunk)
+		if progress != nil {
+			progress(totalIndexed, len(emails))
+		}
 		elapsed := time.Since(start)
 		rate := float64(totalIndexed) / elapsed.Seconds()
 		log.Printf("Indexed %d/%d emails into Qdrant (%.1f emails/sec, %.1fs elapsed)",
