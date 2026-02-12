@@ -1,0 +1,22 @@
+# Synced emails (large data, keep local)
+emails/
+
+# Secrets and credentials
+secrets/
+config/*
+!config/example.yml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Docker
+.docker/
+
+# Go binaries
+search/mail-search
+
+# Index data
+data/
+*.parquet

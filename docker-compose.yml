@@ -1,0 +1,70 @@
+services:
+  mail-sync:
+    build: .
+    container_name: mail-sync
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    restart: unless-stopped
+    expose:
+      - "8081"
+    volumes:
+      - ./config:/app/config:ro
+      - ./emails:/app/emails
+      - ./secrets:/app/secrets
+    environment:
+      TZ: Europe/Berlin
+      LOG_LEVEL: INFO
+      EMAILS_DIR: /app/emails
+      CONFIG_DIR: /app/config
+      SECRETS_DIR: /app/secrets
+      SYNC_API_PORT: "8081"
+
+  # One-off sync for a single account (e.g. docker compose run sync-one eslider-gmail)
+  sync-one:
+    build: .
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    volumes:
+      - ./config:/app/config:ro
+      - ./emails:/app/emails
+      - ./secrets:/app/secrets
+    environment:
+      TZ: Europe/Berlin
+      EMAILS_DIR: /app/emails
+      CONFIG_DIR: /app/config
+      SECRETS_DIR: /app/secrets
+    entrypoint: ["python", "/app/scripts/sync_one.py"]
+
+  # Email search UI + API (Go)
+  mail-search:
+    build: ./search
+    container_name: mail-search
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./emails:/app/emails:ro
+      - ./data:/app/data
+    environment:
+      TZ: Europe/Berlin
+      EMAILS_DIR: /app/emails
+      INDEX_PATH: /app/data/index.parquet
+      LISTEN_ADDR: ":8080"
+      SYNC_URL: "http://mail-sync:8081"
+    develop:
+      watch:
+        - action: rebuild
+          path: ./search
+          ignore:
+            - mail-search
+
+  # Test IMAP/SMTP server — use with: docker compose --profile test up
+  greenmail:
+    image: greenmail/standalone:2.1.2
+    container_name: greenmail
+    environment:
+      GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled"
+    ports:
+      - "3025:3025"   # SMTP
+      - "3143:3143"   # IMAP
+    profiles:
+      - test

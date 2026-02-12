@@ -1,0 +1,35 @@
+# Example IMAP account config
+# Copy this file: cp example.yml my-account.yml
+# Supported types: IMAP, POP3, GMAIL_API
+
+type: IMAP
+email: user@example.com
+password: your-app-password
+host: imap.example.com
+port: 993
+ssl: true
+# Which IMAP folders to sync (default: INBOX only)
+# Use "all" to auto-discover and sync all folders
+folders:
+  - INBOX
+  - "[Gmail]/Sent Mail"
+  - "[Gmail]/All Mail"
+# folders: all   # alternative: sync every folder
+sync:
+  interval: 5m
+# --- POP3 example ---
+# type: POP3
+# email: user@example.com
+# password: your-app-password
+# host: pop.example.com
+# port: 995
+# ssl: true
+# sync:
+#   interval: 10m
+
+# --- Gmail API example (OAuth2, no password needed) ---
+# type: GMAIL_API
+# email: user@gmail.com
+# credentials_file: /app/secrets/credentials.json
+# sync:
+#   interval: 5m
