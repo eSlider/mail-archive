@@ -117,15 +117,14 @@ func (idx *Index) saveParquet() error {
 	return err
 }
 
-// Build walks the email directory, parses every .eml file, stores them in
-// DuckDB and exports to Parquet with zstd. Emails with duplicate content
-// checksums are deduplicated. It replaces the previous index atomically.
-func (idx *Index) Build() (int, int) {
+// WalkEmails walks the email directory, parses .eml files, and returns
+// deduplicated emails by checksum. Used for both DuckDB indexing and Qdrant.
+func WalkEmails(emailDir string) ([]eml.Email, int) {
 	var parsed []eml.Email
 	var errCount int
 	seen := make(map[string]bool)
 
-	_ = filepath.WalkDir(idx.emailDir, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(emailDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
@@ -144,12 +143,20 @@ func (idx *Index) Build() (int, int) {
 			errCount++
 			return nil
 		}
-		if rel, relErr := filepath.Rel(idx.emailDir, path); relErr == nil {
+		if rel, relErr := filepath.Rel(emailDir, path); relErr == nil {
 			e.Path = rel
 		}
 		parsed = append(parsed, e)
 		return nil
 	})
+	return parsed, errCount
+}
+
+// Build walks the email directory, parses every .eml file, stores them in
+// DuckDB and exports to Parquet with zstd. Emails with duplicate content
+// checksums are deduplicated. It replaces the previous index atomically.
+func (idx *Index) Build() (int, int) {
+	parsed, errCount := WalkEmails(idx.emailDir)
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

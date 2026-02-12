@@ -1,29 +1,77 @@
-# TODO — Mail Sync Project
+# TODO — Mail Archive & Search Project
 
-## Done
+## Current Status (2026-02)
 
-- [x] **Project structure** — established directory layout: `config/`, `emails/`, `scripts/`, `secrets/`
-- [x] **Docker Compose** — single-service `mail-sync` container with volume mounts for config, emails, and secrets
-- [x] **Dockerfile** — Python 3.12-slim base with `tini` init, pip dependencies, daemon entrypoint
-- [x] **IMAP sync** (`scripts/sync_imap.py`) — full IMAP client using `imapclient`, batched UID-based downloads, deduplication via `.sync_state` file, stores as `emails/{account}/{YYYY-MM-DD}_{HH}_{MM}_{uid}_{subject}.eml`
-- [x] **POP3 sync** (`scripts/sync_pop3.py`) — POP3/POP3S client using stdlib `poplib`, SHA-256 hash dedup (POP3 has no stable UIDs), same storage format
-- [x] **Gmail API sync** (`scripts/sync_gmail_api.py`) — OAuth2 flow via `google-auth-oauthlib`, downloads raw RFC822 messages through Gmail REST API, token persistence in `secrets/`
-- [x] **Config loader** (`scripts/config_loader.py`) — reads `config/*.yml`, validates type/email fields, parses human-readable intervals (`5m`, `1h`, `1d`)
-- [x] **Daemon / scheduler** (`scripts/daemon.py`) — loads all account configs, schedules periodic sync per account via `schedule` lib, graceful SIGTERM/SIGINT shutdown
-- [x] **Example config** (`config/example.yml`) — documented template covering IMAP, POP3, and GMAIL_API types
-- [x] **`.gitignore`** — excludes `emails/`, `secrets/`, account configs (only `example.yml` tracked)
-- [x] **`requirements.txt`** — pinned dependencies: `imapclient`, `pyyaml`, `schedule`, `google-api-python-client`, `google-auth-oauthlib`
+### Done
+
+**Sync pipeline**
+- [x] IMAP, POP3, Gmail API sync with config-driven scheduler
+- [x] DuckDB + Parquet index for keyword search (substring in subject/body)
+- [x] Go search app with CLI + web UI, pagination, email detail view
+- [x] GreenMail integration test profile
+
+**Vector / similarity search**
+- [x] Qdrant vector DB service in docker-compose
+- [x] Ollama integration for embeddings (host Ollama on 127.0.0.1:11434)
+- [x] Embedding pipeline: subject + body → sentence-transformers/all-MiniLM-L6-v2 → 384-dim vectors
+- [x] Dynamic embedding dimension from Ollama; auto-recreate Qdrant collection on model switch
+- [x] Chunked indexing (500 emails per chunk) for progress and memory control
+- [x] Keyword / Similarity mode toggle in web UI
+- [x] `mail-search` uses `network_mode: host` to reach host Ollama
+
+### In progress / needs verification
+
+- [ ] **Vector index population** — first full reindex (34k emails) may take 30–60 min; verify completion and similarity search
+- [ ] **Ollama reachability from Docker** — when not using `network_mode: host`, ensure Ollama binds to `0.0.0.0` (e.g. `OLLAMA_HOST=0.0.0.0`) for `host.docker.internal` access
+
+---
+
+## GPU & Embedding Architecture
+
+| Component       | Status                          |
+|----------------|----------------------------------|
+| **GPU**         | Not detected (no `nvidia-smi`)   |
+| **Ollama backend** | CPU (or system default)       |
+| **Embedding model** | `all-minilm` (sentence-transformers/all-MiniLM-L6-v2) |
+| **Embedding dims** | 384 |
+| **Context length** | 512 tokens |
+
+### Tokenizer / limits
+
+- **Architecture:** sentence-transformers (MiniLM)
+- **Tokenizer:** model-internal; Ollama handles tokenization
+- **Limits:** We truncate input to 2000 chars (`maxTextLen`) to stay under 512-token context
+- **Batch size:** 8 texts per Ollama `/api/embed` call to avoid context-length errors
+
+---
 
 ## Not Yet Done
 
+### High priority
 - [ ] Unit tests for sync modules and config loader
-- [ ] Integration test with a local IMAP server (e.g. GreenMail in Docker)
-- [ ] Gmail API OAuth2 initial authorization flow (requires browser, not headless-friendly yet)
+- [ ] Integration test with GreenMail
+- [ ] Confirm vector reindex completes successfully end-to-end
+
+### Medium priority
+- [ ] Gmail OAuth2 headless flow (device code or host-side authorize script)
+- [ ] Thunderbird profile import (mbox/Maildir)
+
+### Low priority
 - [ ] Attachment extraction to separate directory
-- [ ] Email body indexing / full-text search
-- [ ] Thunderbird profile import (read from `~/.thunderbird/` Maildir/mbox)
-- [ ] Web UI for browsing downloaded emails
-- [ ] Health check endpoint for Docker
-- [ ] Notification on sync errors (webhook, email alert)
-- [ ] Log rotation / structured JSON logging
-- [ ] Multi-architecture Docker image build (amd64/arm64)
+- [ ] Full-text search index (beyond DuckDB substring) — SQLite FTS5 or Meilisearch
+- [ ] Health check endpoint in daemon
+- [ ] Notification on sync errors (webhook/email)
+- [ ] Multi-arch Docker (amd64/arm64)
+- [ ] GPU support for Ollama when NVIDIA available (pass `--gpus all` to ollama container)
+
+---
+
+## Future: GPU & Nomic
+
+If you add an NVIDIA GPU and want to use it:
+- Run Ollama with `--gpus all` (or `runtime: nvidia` in compose)
+- Ollama will use CUDA when available
+
+To use Nomic instead of all-minilm (768 dims, better quality):
+- `ollama pull theepicdev/nomic-embed-text:v1.5-q6_K` or `nomic-embed-text`
+- Set `EMBED_MODEL` to the model name, restart mail-search, reindex (dimension is detected automatically)

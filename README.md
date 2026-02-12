@@ -179,6 +179,7 @@ A Go application (`search/`) indexes all `.eml` files into a DuckDB-backed index
 
 Features:
 - **Case-insensitive substring search** across subject and body text
+- **Semantic similarity search** — vector search via Qdrant + Ollama embeddings (optional)
 - **Checksum-based deduplication** — same email in inbox/allmail/sent is indexed once
 - **Persistent Parquet index** — first run parses all `.eml` files (~17s for 34k emails), subsequent starts load from Parquet in ~1s
 - **Paginated results** with highlighted snippets
@@ -209,13 +210,24 @@ go build -o mail-search .
 The search service is included in `docker-compose.yml`:
 
 ```bash
-# Start the search UI
-docker compose up -d mail-search
+# Start the search UI (with Qdrant + Ollama for similarity search)
+docker compose up -d qdrant ollama mail-search
+
+# Pull the embedding model once (sentence-transformers/all-MiniLM-L6-v2, 384 dims, ~90MB)
+ollama pull all-minilm
+
 # Open http://localhost:8080
+# Use the "Similarity" toggle for semantic search
 
 # Auto-rebuild on Go source changes
 docker compose watch mail-search
 ```
+
+### Similarity search (Qdrant + Ollama)
+
+When `QDRANT_URL` and `OLLAMA_URL` are set, the web UI shows a **Keyword** / **Similarity** toggle. Similarity search uses Qdrant to find semantically related emails based on subject and body embeddings from Ollama's `all-minilm` (sentence-transformers/all-MiniLM-L6-v2) model. On reindex, both the Parquet index and the vector index are rebuilt.
+
+**Model switching:** Set `EMBED_MODEL` to any Ollama embedding model (e.g. `theepicdev/nomic-embed-text:v1.5-q6_K` for 768 dims). Dimension is detected automatically; the Qdrant collection is recreated when it mismatches. Reindex after switching to repopulate. See [Measurements.md](Measurements.md) for throughput and latency.
 
 ### Environment variables (search service)
 
@@ -225,12 +237,15 @@ docker compose watch mail-search
 | `INDEX_PATH` | `index.parquet` | Path to Parquet index file (zstd compressed) |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `SYNC_URL` | _(empty)_ | URL of the sync trigger API (e.g. `http://mail-sync:8081`) |
+| `QDRANT_URL` | _(empty)_ | Qdrant gRPC address for similarity search (e.g. `qdrant:6334`) |
+| `OLLAMA_URL` | _(empty)_ | Ollama API for embeddings (e.g. `http://ollama:11434`) |
+| `EMBED_MODEL` | `all-minilm` | Ollama embedding model (sentence-transformers/all-MiniLM-L6-v2, 384 dims) |
 
 ### HTTP API
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/search?q=keyword&limit=50&offset=0` | GET | Search emails (case-insensitive substring in subject + body) |
+| `/api/search?q=keyword&limit=50&offset=0&mode=similarity` | GET | Search emails. `mode=similarity` uses vector search when available. Default: keyword (substring in subject + body) |
 | `/api/email?path=account/inbox/file.eml` | GET | Get full email content for preview |
 | `/api/stats` | GET | Index statistics |
 | `/api/reindex` | POST | Rebuild index from `.eml` files and save to Parquet |

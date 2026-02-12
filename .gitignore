@@ -20,3 +20,6 @@ search/mail-search
 # Index data
 data/
 *.parquet
+
+# Editor swap
+*.swp

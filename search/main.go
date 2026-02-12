@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/eslider/mails/search/eml"
 	"github.com/eslider/mails/search/index"
+	"github.com/eslider/mails/search/vector"
 )
 
 func envOr(key, fallback string) string {
@@ -36,6 +38,9 @@ func main() {
 	listenAddr := envOr("LISTEN_ADDR", ":8080")
 	indexPath := envOr("INDEX_PATH", "index.parquet")
 	syncURL = envOr("SYNC_URL", "")
+	qdrantURL := envOr("QDRANT_URL", "")
+	ollamaURL := envOr("OLLAMA_URL", "")
+	embedModel := envOr("EMBED_MODEL", "all-minilm")
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -48,17 +53,39 @@ func main() {
 	}
 	defer idx.Close()
 
+	var vecStore *vector.Store
+	if qdrantURL != "" && ollamaURL != "" {
+		vs, err := vector.NewStore(qdrantURL, ollamaURL, embedModel)
+		if err != nil {
+			log.Printf("WARN: vector search unavailable (Qdrant/Ollama): %v", err)
+		} else {
+			defer vs.Close()
+			vecStore = vs
+			log.Printf("Similarity search enabled (Qdrant + Ollama %s)", embedModel)
+		}
+	}
+
 	if idx.Stats().TotalEmails == 0 {
 		log.Printf("Indexing emails from %s ...", emailDir)
 		total, errCount := idx.Build()
 		log.Printf("Indexed %d emails (%d errors)", total, errCount)
+		if vecStore != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			vTotal, _, vErr := vecStore.IndexEmails(ctx, emailDir, index.WalkEmails)
+			cancel()
+			if vErr != nil {
+				log.Printf("WARN: vector index: %v", vErr)
+			} else {
+				log.Printf("Vector index: %d emails", vTotal)
+			}
+		}
 	}
 
 	switch os.Args[1] {
 	case "search":
-		runSearch(idx, os.Args[2:])
+		runSearch(idx, vecStore, os.Args[2:])
 	case "serve":
-		runServer(idx, listenAddr)
+		runServer(idx, vecStore, listenAddr)
 	case "stats":
 		runStats(idx)
 	default:
@@ -81,18 +108,34 @@ Commands:
 Environment:
   EMAILS_DIR       Path to emails directory (default: ../emails)
   INDEX_PATH       Path to Parquet index file (default: index.parquet)
-  LISTEN_ADDR      HTTP listen address (default: :8080)`)
+  LISTEN_ADDR      HTTP listen address (default: :8080)
+  QDRANT_URL       Qdrant gRPC address for similarity search (e.g. qdrant:6334)
+  OLLAMA_URL       Ollama API for embeddings (e.g. http://ollama:11434)
+  EMBED_MODEL      Ollama embedding model (default: all-minilm)`)
 }
 
 // --- CLI search ---
 
-func runSearch(idx *index.Index, args []string) {
+func runSearch(idx *index.Index, vecStore *vector.Store, args []string) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "Usage: mail-search search <query>")
 		os.Exit(1)
 	}
 	query := strings.Join(args, " ")
-	result := idx.Search(query, 0, 0)
+	var result index.SearchResult
+	if vecStore != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		hits, total, err := vecStore.Search(ctx, query, 200, 0)
+		if err != nil {
+			log.Printf("WARN: similarity search failed: %v, falling back to keyword", err)
+			result = idx.Search(query, 0, 0)
+		} else {
+			result = vectorResultsToSearchResult(query, hits, total, 0, 200)
+		}
+	} else {
+		result = idx.Search(query, 0, 0)
+	}
 
 	if result.Total == 0 {
 		fmt.Printf("No emails matching %q\n", query)
@@ -124,6 +167,31 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
+// vectorResultsToSearchResult converts vector.SearchResult to index.SearchResult.
+func vectorResultsToSearchResult(query string, hits []vector.SearchResult, total, offset, limit int) index.SearchResult {
+	idxHits := make([]index.Hit, len(hits))
+	for i, h := range hits {
+		idxHits[i] = index.Hit{
+			Email: eml.Email{
+				Path:    h.Path,
+				Subject: h.Subject,
+				From:    h.From,
+				To:      h.To,
+				Date:    time.Unix(h.Date, 0),
+			},
+			Snippet: "",
+		}
+	}
+	return index.SearchResult{
+		Query:   query,
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		Hits:    idxHits,
+		IndexAt: time.Now(),
+	}
+}
+
 // --- CLI stats ---
 
 func runStats(idx *index.Index) {
@@ -136,14 +204,14 @@ func runStats(idx *index.Index) {
 
 // --- HTTP server ---
 
-func runServer(idx *index.Index, addr string) {
+func runServer(idx *index.Index, vecStore *vector.Store, addr string) {
 	mux := http.NewServeMux()
 
 	// API endpoints.
-	mux.HandleFunc("GET /api/search", handleSearch(idx))
+	mux.HandleFunc("GET /api/search", handleSearch(idx, vecStore))
 	mux.HandleFunc("GET /api/email", handleEmail(idx))
-	mux.HandleFunc("GET /api/stats", handleStats(idx))
-	mux.HandleFunc("POST /api/reindex", handleReindex(idx))
+	mux.HandleFunc("GET /api/stats", handleStats(idx, vecStore))
+	mux.HandleFunc("POST /api/reindex", handleReindex(idx, vecStore))
 	mux.HandleFunc("GET /health", handleHealth(idx))
 
 	// Sync proxy endpoints (forwarded to mail-sync container).
@@ -159,9 +227,10 @@ func runServer(idx *index.Index, addr string) {
 	}
 }
 
-func handleSearch(idx *index.Index) http.HandlerFunc {
+func handleSearch(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query().Get("q")
+		mode := r.URL.Query().Get("mode")
 		limit := queryInt(r, "limit", 50)
 		offset := queryInt(r, "offset", 0)
 		if limit < 1 {
@@ -174,7 +243,20 @@ func handleSearch(idx *index.Index) http.HandlerFunc {
 			offset = 0
 		}
 
-		result := idx.Search(q, offset, limit)
+		var result index.SearchResult
+		if mode == "similarity" && vecStore != nil && strings.TrimSpace(q) != "" {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			hits, total, err := vecStore.Search(ctx, q, limit, offset)
+			if err != nil {
+				log.Printf("WARN: similarity search failed: %v", err)
+				result = index.SearchResult{Query: q, Total: 0, Offset: offset, Limit: limit, Hits: []index.Hit{}, IndexAt: time.Now()}
+			} else {
+				result = vectorResultsToSearchResult(q, hits, total, offset, limit)
+			}
+		} else {
+			result = idx.Search(q, offset, limit)
+		}
 		writeJSON(w, http.StatusOK, result)
 	}
 }
@@ -215,18 +297,51 @@ func handleEmail(idx *index.Index) http.HandlerFunc {
 	}
 }
 
-func handleStats(idx *index.Index) http.HandlerFunc {
+func handleStats(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, idx.Stats())
+		s := idx.Stats()
+		out := map[string]any{
+			"total_emails":        s.TotalEmails,
+			"indexed_at":          s.IndexedAt,
+			"email_dir":           s.EmailDir,
+			"index_path":          s.IndexPath,
+			"similarity_available": vecStore != nil,
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
-func handleReindex(idx *index.Index) http.HandlerFunc {
+func handleReindex(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
 		total, errCount := idx.Build()
-		writeJSON(w, http.StatusOK, map[string]int{
-			"indexed": total,
-			"errors":  errCount,
+		parquetSecs := time.Since(start).Seconds()
+		log.Printf("Parquet index: %d emails in %.1fs (%.1f emails/sec)", total, parquetSecs, float64(total)/parquetSecs)
+
+		vecIndexed := 0
+		var vectorSecs float64
+		if vecStore != nil {
+			vecStart := time.Now()
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+			defer cancel()
+			vTotal, _, vErr := vecStore.IndexEmails(ctx, idx.EmailDir(), index.WalkEmails)
+			vectorSecs = time.Since(vecStart).Seconds()
+			if vErr != nil {
+				log.Printf("WARN: vector reindex: %v", vErr)
+			} else {
+				vecIndexed = vTotal
+			}
+		}
+
+		totalSecs := time.Since(start).Seconds()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"indexed":       total,
+			"errors":        errCount,
+			"vec_indexed":  vecIndexed,
+			"parquet_secs": parquetSecs,
+			"vector_secs":  vectorSecs,
+			"total_secs":   totalSecs,
 		})
 	}
 }
@@ -363,6 +478,19 @@ const uiHTML = `<!DOCTYPE html>
     padding: 0.25rem 0.7rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
   }
   .btn-sm:hover { border-color: var(--accent); color: var(--text); }
+  .mode-toggle {
+    display: flex; gap: 0; border-radius: 6px; overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .mode-toggle button {
+    background: none; border: none; color: var(--text-dim);
+    padding: 0.25rem 0.6rem; font-size: 0.75rem; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .mode-toggle button:hover { color: var(--text); }
+  .mode-toggle button.active {
+    background: var(--accent); color: #fff; font-weight: 500;
+  }
   .results { display: flex; flex-direction: column; gap: 0.4rem; }
   .email-card {
     background: var(--surface); border: 1px solid var(--border);
@@ -566,7 +694,13 @@ const uiHTML = `<!DOCTYPE html>
         <input type="text" id="q" placeholder="Search emails by subject and body..." autofocus>
       </div>
       <div class="meta">
-        <span id="result-count"></span>
+        <span style="display:flex;align-items:center;gap:0.6rem">
+          <span id="result-count"></span>
+          <span class="mode-toggle" id="mode-toggle" style="display:none">
+            <button type="button" data-mode="keyword" id="mode-keyword">Keyword</button>
+            <button type="button" data-mode="similarity" id="mode-similarity">Similarity</button>
+          </span>
+        </span>
         <button class="btn-sm" id="reindex-btn">Reindex</button>
       </div>
       <div id="results" class="results"></div>
@@ -604,6 +738,8 @@ const uiHTML = `<!DOCTYPE html>
   var PAGE_SIZE = 50;
   var currentOffset = 0;
   var currentQuery = '';
+  var searchMode = 'keyword';
+  var similarityAvailable = false;
 
   // --- Routing ---
   function navigate(hash) {
@@ -647,6 +783,9 @@ const uiHTML = `<!DOCTYPE html>
         var d = new Date(s.indexed_at);
         indexInfo.textContent = 'Indexed ' + d.toLocaleString();
       }
+      similarityAvailable = s.similarity_available === true;
+      var mt = document.getElementById('mode-toggle');
+      if (mt) mt.style.display = similarityAvailable ? 'flex' : 'none';
     } catch(e) {}
   }
 
@@ -662,7 +801,9 @@ const uiHTML = `<!DOCTYPE html>
     currentQuery = query;
     currentOffset = offset;
     try {
-      var r = await fetch('/api/search?limit=' + PAGE_SIZE + '&offset=' + offset + '&q=' + encodeURIComponent(query));
+      var url = '/api/search?limit=' + PAGE_SIZE + '&offset=' + offset + '&q=' + encodeURIComponent(query);
+      if (searchMode === 'similarity') url += '&mode=similarity';
+      var r = await fetch(url);
       var data = await r.json();
       renderList(data, query);
       renderPager(data);
@@ -673,14 +814,17 @@ const uiHTML = `<!DOCTYPE html>
   }
 
   function renderList(data, query) {
-    var start = data.offset + 1;
-    var end = data.offset + (data.hits ? data.hits.length : 0);
-    if (data.total === 0) {
+    var total = (typeof data.total === 'number') ? data.total : 0;
+    var offset = (typeof data.offset === 'number') ? data.offset : 0;
+    var hits = data.hits || [];
+    var start = offset + 1;
+    var end = offset + hits.length;
+    if (total === 0) {
       countSpan.textContent = '0 results';
     } else {
-      countSpan.textContent = start + '–' + end + ' of ' + data.total + ' result' + (data.total !== 1 ? 's' : '');
+      countSpan.textContent = start + '–' + end + ' of ' + total + ' result' + (total !== 1 ? 's' : '');
     }
-    var items = data.hits || [];
+    var items = hits;
     if (items.length === 0) {
       resultsDiv.innerHTML = '<div class="empty"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 9v.906a2.25 2.25 0 0 1-1.183 1.981l-6.478 3.488M2.25 9v.906a2.25 2.25 0 0 0 1.183 1.981l6.478 3.488m8.839 2.51-4.66-2.51m0 0-1.023-.55a2.25 2.25 0 0 0-2.134 0l-1.022.55m0 0-4.661 2.51m16.5 1.615a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V8.844a2.25 2.25 0 0 1 1.183-1.981l7.5-4.039a2.25 2.25 0 0 1 2.134 0l7.5 4.039a2.25 2.25 0 0 1 1.183 1.98V19.5Z"/></svg><p>No emails found' + (query ? ' for "' + esc(query) + '"' : '') + '</p></div>';
       pagerDiv.innerHTML = '';
@@ -710,9 +854,9 @@ const uiHTML = `<!DOCTYPE html>
   }
 
   function renderPager(data) {
-    var total = data.total;
-    var limit = data.limit || PAGE_SIZE;
-    var offset = data.offset || 0;
+    var total = (typeof data.total === 'number') ? data.total : 0;
+    var limit = (typeof data.limit === 'number') ? data.limit : PAGE_SIZE;
+    var offset = (typeof data.offset === 'number') ? data.offset : 0;
     var totalPages = Math.ceil(total / limit);
     var currentPage = Math.floor(offset / limit);
 
@@ -1033,6 +1177,25 @@ const uiHTML = `<!DOCTYPE html>
     currentOffset = 0;
     debounceTimer = setTimeout(function() { doSearch(qInput.value, 0); }, 200);
   });
+
+  // Mode toggle
+  var modeKeyword = document.getElementById('mode-keyword');
+  var modeSimilarity = document.getElementById('mode-similarity');
+  if (modeKeyword) modeKeyword.addEventListener('click', function() {
+    searchMode = 'keyword';
+    modeKeyword.classList.add('active');
+    if (modeSimilarity) modeSimilarity.classList.remove('active');
+    currentOffset = 0;
+    doSearch(qInput.value, 0);
+  });
+  if (modeSimilarity) modeSimilarity.addEventListener('click', function() {
+    searchMode = 'similarity';
+    modeSimilarity.classList.add('active');
+    if (modeKeyword) modeKeyword.classList.remove('active');
+    currentOffset = 0;
+    doSearch(qInput.value, 0);
+  });
+  if (modeKeyword) modeKeyword.classList.add('active');
 
   reindexBtn.addEventListener('click', async function() {
     reindexBtn.innerHTML = '<span class="spinner"></span>';

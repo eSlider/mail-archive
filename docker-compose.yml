@@ -4,8 +4,8 @@ services:
     container_name: mail-sync
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     restart: unless-stopped
-    expose:
-      - "8081"
+    ports:
+      - "8081:8081"
     volumes:
       - ./config:/app/config:ro
       - ./emails:/app/emails
@@ -39,8 +39,9 @@ services:
     container_name: mail-search
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     restart: unless-stopped
-    ports:
-      - "8080:8080"
+    depends_on:
+      - qdrant
+    network_mode: host
     volumes:
       - ./emails:/app/emails:ro
       - ./data:/app/data
@@ -49,13 +50,37 @@ services:
       EMAILS_DIR: /app/emails
       INDEX_PATH: /app/data/index.parquet
       LISTEN_ADDR: ":8080"
-      SYNC_URL: "http://mail-sync:8081"
+      SYNC_URL: "http://127.0.0.1:8081"
+      QDRANT_URL: "http://127.0.0.1:6334"
+      OLLAMA_URL: "http://127.0.0.1:11434"
+      EMBED_MODEL: "all-minilm"
     develop:
       watch:
         - action: rebuild
           path: ./search
           ignore:
             - mail-search
+
+  # Vector DB for similarity search (requires Ollama + embedding model)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+
+  # Embedding model: use host Ollama. Run: ollama pull all-minilm
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   ports:
+  #     - "11435:11434"
 
   # Test IMAP/SMTP server — use with: docker compose --profile test up
   greenmail:
@@ -68,3 +93,7 @@ services:
       - "3143:3143"   # IMAP
     profiles:
       - test
+
+volumes:
+  qdrant_storage:
+  # ollama_data:
