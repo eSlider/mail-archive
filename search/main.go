@@ -111,7 +111,7 @@ Environment:
   INDEX_PATH       Path to Parquet index file (default: index.parquet)
   LISTEN_ADDR      HTTP listen address (default: :8080)
   QDRANT_URL       Qdrant gRPC address for similarity search (e.g. qdrant:6334)
-  OLLAMA_URL       Ollama API for embeddings (e.g. http://ollama:11434)
+  OLLAMA_URL       Ollama API (e.g. http://172.17.0.1:11434 for host from Docker)
   EMBED_MODEL      Ollama embedding model (default: all-minilm)`)
 }
 
@@ -252,8 +252,8 @@ func handleSearch(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 			defer cancel()
 			hits, total, err := vecStore.Search(ctx, q, limit, offset)
 			if err != nil {
-				log.Printf("WARN: similarity search failed: %v", err)
-				result = index.SearchResult{Query: q, Total: 0, Offset: offset, Limit: limit, Hits: []index.Hit{}, IndexAt: time.Now()}
+				log.Printf("WARN: similarity search failed: %v, falling back to keyword", err)
+				result = idx.Search(q, offset, limit)
 			} else {
 				result = vectorResultsToSearchResult(q, hits, total, offset, limit)
 			}

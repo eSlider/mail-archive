@@ -238,7 +238,7 @@ When `QDRANT_URL` and `OLLAMA_URL` are set, the web UI shows a **Keyword** / **S
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `SYNC_URL` | _(empty)_ | URL of the sync trigger API (e.g. `http://mail-sync:8081`) |
 | `QDRANT_URL` | _(empty)_ | Qdrant gRPC address for similarity search (e.g. `qdrant:6334`) |
-| `OLLAMA_URL` | _(empty)_ | Ollama API for embeddings (e.g. `http://ollama:11434`) |
+| `OLLAMA_URL` | _(empty)_ | Ollama API for embeddings. Use `http://172.17.0.1:11434` for host Ollama from containers. Set `OLLAMA_HOST=0.0.0.0` on the host so Ollama accepts connections. |
 | `EMBED_MODEL` | `all-minilm` | Ollama embedding model (sentence-transformers/all-MiniLM-L6-v2, 384 dims) |
 
 ### HTTP API

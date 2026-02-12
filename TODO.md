@@ -12,7 +12,7 @@
 
 **Vector / similarity search**
 - [x] Qdrant vector DB service in docker-compose
-- [x] Ollama integration for embeddings (host Ollama on 127.0.0.1:11434)
+- [x] Ollama integration for embeddings (host Ollama via http://172.17.0.1:11434)
 - [x] Embedding pipeline: subject + body → sentence-transformers/all-MiniLM-L6-v2 → 384-dim vectors
 - [x] Dynamic embedding dimension from Ollama; auto-recreate Qdrant collection on model switch
 - [x] Chunked indexing (500 emails per chunk) for progress and memory control

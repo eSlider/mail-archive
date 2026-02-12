@@ -7,12 +7,14 @@ See [AGENTS.md](AGENTS.md) for architecture decisions and coding guidelines. Thi
 Qdrant runs on port 6333 (REST) and 6334 (gRPC). With `docker compose up`, it's available at `localhost`.
 
 **Check Qdrant is running:**
+
 ```bash
 curl -s http://localhost:6333/collections
 # {"result":{"collections":[{"name":"mail_emails"}]},"status":"ok",...}
 ```
 
 **Check collection status:**
+
 ```bash
 curl -s http://localhost:6333/collections/mail_emails
 # Shows: status, points_count, config (vector size, distance)
@@ -20,19 +22,12 @@ curl -s http://localhost:6333/collections/mail_emails
 
 **Collection must have vectors for similarity search.** If `points_count` is 0, run a reindex (see below). Expect ~25 emails/sec for vector indexing; 34k emails ≈ 23 minutes.
 
-**Dimension mismatch:** If vector size is 768 but you use `all-minilm` (384 dims), delete and recreate:
-```bash
-curl -X DELETE http://localhost:6333/collections/mail_emails
-curl -X PUT http://localhost:6333/collections/mail_emails -H "Content-Type: application/json" -d '{"vectors":{"size":384,"distance":"Cosine"}}'
-# Then reindex
-curl -X POST http://localhost:8080/api/reindex
-```
-
 ## HTTP API Examples
 
 Base URL: `http://localhost:8080` (mail-search service)
 
 ### Health check
+
 ```bash
 curl -s http://localhost:8080/health
 ```
@@ -53,6 +48,7 @@ curl -s "http://localhost:8080/api/search?q=&limit=10"
 ```
 
 **Response:**
+
 ```json
 {
   "query": "fabrik",
@@ -83,19 +79,22 @@ curl -s "http://localhost:8080/api/search?q=project+deadline&mode=similarity&lim
 ```
 
 **Prerequisites:**
-- Ollama running with embedding model: `ollama pull all-minilm`
+
+- Ollama on host: `OLLAMA_HOST=0.0.0.0 ollama serve`. Then `ollama pull all-minilm`. With Docker use `OLLAMA_URL=http://172.17.0.1:11434`
 - Vector index populated: `curl -X POST http://localhost:8080/api/reindex` (run once, takes ~25 emails/sec)
 - Qdrant collection dimension must match model (384 for all-minilm). Mismatch → delete collection and reindex.
 
 **Response:** Same shape as keyword search; similarity mode orders by relevance score.
 
 ### Get single email
+
 ```bash
 # path is URL-encoded, from search hit
 curl -s "http://localhost:8080/api/email?path=eslider-gmail%2Fallmail%2Fabc123-123.eml"
 ```
 
 ### Index stats
+
 ```bash
 curl -s http://localhost:8080/api/stats
 # {"total_emails":34229,"indexed_at":"...","similarity_available":true,...}
@@ -118,6 +117,7 @@ curl -s http://localhost:8080/api/reindex/status
 If `running` is true, poll every 2–3 seconds until done.
 
 ### Sync (forwarded to mail-sync)
+
 ```bash
 # List accounts
 curl -s http://localhost:8080/api/accounts
@@ -133,12 +133,12 @@ curl -s -X POST http://localhost:8080/api/sync -H "Content-Type: application/jso
 
 For debugging or custom integrations, Qdrant exposes its own API:
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /collections` | List collections |
-| `GET /collections/{name}` | Collection info (points, config) |
-| `DELETE /collections/{name}` | Delete collection |
-| `PUT /collections/{name}` | Create collection (body: `{"vectors":{"size":384,"distance":"Cosine"}}`) |
+| Endpoint                     | Description                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `GET /collections`           | List collections                                                         |
+| `GET /collections/{name}`    | Collection info (points, config)                                         |
+| `DELETE /collections/{name}` | Delete collection                                                        |
+| `PUT /collections/{name}`    | Create collection (body: `{"vectors":{"size":384,"distance":"Cosine"}}`) |
 
 ```bash
 # Create empty collection (384 dims for all-minilm)

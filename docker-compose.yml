@@ -52,7 +52,7 @@ services:
       LISTEN_ADDR: ":8080"
       SYNC_URL: "http://127.0.0.1:8081"
       QDRANT_URL: "http://127.0.0.1:6334"
-      OLLAMA_URL: "http://127.0.0.1:11434"
+      OLLAMA_URL: "http://172.17.0.1:11434"
       EMBED_MODEL: "all-minilm"
     develop:
       watch:
@@ -72,7 +72,9 @@ services:
       - "6333:6333"
       - "6334:6334"
 
-  # Embedding model: use host Ollama. Run: ollama pull all-minilm
+  # Embedding model: use host Ollama at 172.17.0.1 (Docker bridge gateway).
+  # On host: OLLAMA_HOST=0.0.0.0 ollama serve  (to accept connections from containers)
+  # Run: ollama pull all-minilm
   # ollama:
   #   image: ollama/ollama:latest
   #   container_name: ollama

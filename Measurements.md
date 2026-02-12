@@ -8,7 +8,7 @@
 | **GPU**               | None                                                  |
 | **Embedding model**   | `all-minilm` (sentence-transformers/all-MiniLM-L6-v2) |
 | **Vector dimensions** | 384                                                   |
-| **Ollama**            | Host, port 11434                                      |
+| **Ollama**            | Host at 172.17.0.1:11434 (Docker bridge gateway)     |
 
 ---
 
