@@ -20,6 +20,7 @@
         searchQuery: '',
         searchResults: null,
         searchMode: 'keyword',
+        searchAccountFilter: '',
         currentPage: 0,
         pageSize: 50,
         selectedEmail: null,
@@ -114,8 +115,15 @@
       handleRoute: function () {
         var hash = location.hash || '#'
         if (hash.indexOf('#/email/') === 0) {
-          var emailPath = decodeURIComponent(hash.slice(8))
-          this.showEmailDetail(emailPath)
+          var rest = hash.slice(8)
+          var qIdx = rest.indexOf('?')
+          var emailPath = decodeURIComponent(qIdx >= 0 ? rest.slice(0, qIdx) : rest)
+          var accountId = null
+          if (qIdx >= 0) {
+            var params = new URLSearchParams(rest.slice(qIdx))
+            accountId = params.get('account_id')
+          }
+          this.showEmailDetail(emailPath, accountId)
         } else if (hash === '#/accounts') {
           this.view = 'accounts'
         } else if (hash === '#/sync') {
@@ -252,6 +260,7 @@
         var self = this
         var url = '/api/search?limit=' + this.pageSize + '&offset=' + (offset || 0)
         url += '&q=' + encodeURIComponent(query || '')
+        if (this.searchAccountFilter) url += '&account_id=' + encodeURIComponent(this.searchAccountFilter)
         if (this.searchMode === 'similarity') url += '&mode=similarity'
 
         $.getJSON(url).done(function (data) {
@@ -274,6 +283,17 @@
         this.doSearch(this.searchQuery, 0)
       },
 
+      onSearchAccountFilterChange: function () {
+        this.currentPage = 0
+        this.doSearch(this.searchQuery, 0)
+      },
+
+      emailDetailHref: function (hit) {
+        var h = '#/email/' + encodeURIComponent(hit.path)
+        if (hit.account_id) h += '?account_id=' + encodeURIComponent(hit.account_id)
+        return h
+      },
+
       highlightText: function (text, query) {
         if (!query || !text) return this.escapeHtml(text || '')
         var escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -289,13 +309,15 @@
       },
 
       // --- Email Detail ---
-      showEmailDetail: function (path) {
+      showEmailDetail: function (path, accountId) {
         var self = this
         this.view = 'detail'
         this.loading = true
         this.selectedEmail = null
 
-        $.getJSON('/api/email?path=' + encodeURIComponent(path)).done(function (data) {
+        var url = '/api/email?path=' + encodeURIComponent(path)
+        if (accountId) url += '&account_id=' + encodeURIComponent(accountId)
+        $.getJSON(url).done(function (data) {
           self.selectedEmail = data
           self.loading = false
           // Set iframe content after Vue renders.

@@ -215,7 +215,14 @@ func (idx *Index) Build() (int, int) {
 // Hit is a single search result with a context snippet.
 type Hit struct {
 	eml.Email
-	Snippet string `json:"snippet,omitempty"`
+	Snippet   string `json:"snippet,omitempty"`
+	AccountID string `json:"account_id,omitempty"`
+}
+
+// AccountIndex identifies an account and its parquet index path for multi-account search.
+type AccountIndex struct {
+	ID        string
+	IndexPath string
 }
 
 // SearchResult wraps matched emails with metadata.
@@ -254,6 +261,132 @@ func (idx *Index) Search(query string, offset, limit int) SearchResult {
 		Hits:    hits,
 		IndexAt: idx.buildAt,
 	}
+}
+
+// SearchMulti searches across multiple account indices. Hits include AccountID.
+// Returns empty result if no indices exist. Skips accounts whose parquet file is missing.
+func SearchMulti(accounts []AccountIndex, query string, offset, limit int) SearchResult {
+	if len(accounts) == 0 {
+		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
+	}
+
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		log.Printf("ERROR: SearchMulti open duckdb: %v", err)
+		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	var unionParts []string
+	for _, a := range accounts {
+		if a.IndexPath == "" {
+			continue
+		}
+		if _, statErr := os.Stat(a.IndexPath); statErr != nil {
+			continue
+		}
+		escaped := strings.ReplaceAll(a.IndexPath, "'", "''")
+		unionParts = append(unionParts,
+			fmt.Sprintf("SELECT '%s' AS account_id, path, subject, from_addr, to_addr, date, size, body_text FROM read_parquet('%s')",
+				strings.ReplaceAll(a.ID, "'", "''"), escaped))
+	}
+	if len(unionParts) == 0 {
+		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
+	}
+
+	createSQL := "CREATE TEMP TABLE emails AS " + strings.Join(unionParts, " UNION ALL ")
+	if _, err := db.Exec(createSQL); err != nil {
+		log.Printf("ERROR: SearchMulti create: %v", err)
+		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
+	}
+
+	q := strings.ToLower(strings.TrimSpace(query))
+	var total int
+	if q == "" {
+		_ = db.QueryRow("SELECT COUNT(*) FROM emails").Scan(&total)
+	} else {
+		_ = db.QueryRow(
+			"SELECT COUNT(*) FROM emails WHERE contains(LOWER(subject), ?) OR contains(LOWER(body_text), ?)",
+			q, q).Scan(&total)
+	}
+
+	var hits []Hit
+	if q == "" {
+		hits = queryMultiPage(db, "", offset, limit)
+	} else {
+		hits = queryMultiMatches(db, q, offset, limit)
+	}
+
+	return SearchResult{
+		Query:   query,
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		Hits:    hits,
+		IndexAt: time.Time{},
+	}
+}
+
+func queryMultiPage(db *sql.DB, _ string, offset, limit int) []Hit {
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.Query(
+			"SELECT account_id, path, subject, from_addr, to_addr, date, size FROM emails ORDER BY date DESC NULLS LAST LIMIT ? OFFSET ?",
+			limit, offset)
+	} else {
+		rows, err = db.Query(
+			"SELECT account_id, path, subject, from_addr, to_addr, date, size FROM emails ORDER BY date DESC NULLS LAST")
+	}
+	if err != nil {
+		log.Printf("WARN: queryMultiPage: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	return scanMultiHits(rows, "", false)
+}
+
+func queryMultiMatches(db *sql.DB, q string, offset, limit int) []Hit {
+	const base = `SELECT account_id, path, subject, from_addr, to_addr, date, size, body_text
+		FROM emails
+		WHERE contains(LOWER(subject), ?) OR contains(LOWER(body_text), ?)
+		ORDER BY date DESC NULLS LAST`
+	var rows *sql.Rows
+	var err error
+	if limit > 0 {
+		rows, err = db.Query(base+" LIMIT ? OFFSET ?", q, q, limit, offset)
+	} else {
+		rows, err = db.Query(base, q, q)
+	}
+	if err != nil {
+		log.Printf("WARN: queryMultiMatches: %v", err)
+		return nil
+	}
+	defer rows.Close()
+	return scanMultiHits(rows, q, true)
+}
+
+func scanMultiHits(rows *sql.Rows, query string, withBody bool) []Hit {
+	var hits []Hit
+	for rows.Next() {
+		var h Hit
+		var scanErr error
+		if withBody {
+			scanErr = rows.Scan(&h.AccountID, &h.Path, &h.Subject, &h.From, &h.To, &h.Date, &h.Size, &h.BodyText)
+		} else {
+			scanErr = rows.Scan(&h.AccountID, &h.Path, &h.Subject, &h.From, &h.To, &h.Date, &h.Size)
+		}
+		if scanErr != nil {
+			log.Printf("WARN: scanMultiHits: %v", scanErr)
+			continue
+		}
+		if query != "" {
+			h.Snippet = eml.Snippet(eml.Email{Path: h.Path, Subject: h.Subject, From: h.From, To: h.To, Date: h.Date, Size: h.Size, BodyText: h.BodyText}, query, 80)
+		}
+		hits = append(hits, h)
+	}
+	return hits
 }
 
 func (idx *Index) queryPage(offset, limit int) []Hit {

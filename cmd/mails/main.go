@@ -61,9 +61,9 @@ Commands:
   version     Print version information
 
 Environment:
-  LISTEN_ADDR         HTTP listen address (default: :8080)
+  LISTEN_ADDR         HTTP listen address (default: :8090)
   DATA_DIR            Base data directory (default: ./users)
-  BASE_URL            Public base URL for OAuth callbacks (default: http://localhost:8080)
+  BASE_URL            Public base URL for OAuth callbacks (default: http://localhost:8090)
 
   GITHUB_CLIENT_ID    GitHub OAuth app client ID
   GITHUB_CLIENT_SECRET GitHub OAuth app client secret
@@ -78,9 +78,9 @@ Environment:
 }
 
 func runServe() {
-	listenAddr := envOr("LISTEN_ADDR", ":8080")
+	listenAddr := envOr("LISTEN_ADDR", ":8090")
 	dataDir := envOr("DATA_DIR", "./users")
-	baseURL := envOr("BASE_URL", "http://localhost:8080")
+	baseURL := envOr("BASE_URL", "http://localhost:8090")
 
 	// Initialize stores.
 	userStore, err := user.NewStore(dataDir)

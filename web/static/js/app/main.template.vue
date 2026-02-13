@@ -28,13 +28,17 @@
       <span v-if="searchResults">
         {{ searchResults.total || 0 }} result{{ searchResults.total !== 1 ? "s" : "" }}
       </span>
-      <div style="display:flex;gap:0.5rem">
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
+        <select v-model="searchAccountFilter" @change="onSearchAccountFilterChange" class="form-control form-control-sm" style="max-width:220px">
+          <option value="">All accounts</option>
+          <option v-for="acct in accounts" :key="acct.id" :value="acct.id">{{ acct.email }}</option>
+        </select>
         <button class="btn btn-sm" :class="{'btn-primary': searchMode === 'keyword'}" @click="setSearchMode('keyword')">Keyword</button>
         <button class="btn btn-sm" :class="{'btn-primary': searchMode === 'similarity'}" @click="setSearchMode('similarity')">Similarity</button>
       </div>
     </div>
     <div v-if="searchResults && searchResults.hits.length">
-      <a v-for="hit in searchResults.hits" :key="hit.path" class="email-card" :href="'#/email/' + encodeURIComponent(hit.path)">
+      <a v-for="hit in searchResults.hits" :key="(hit.account_id || '') + '/' + hit.path" class="email-card" :href="emailDetailHref(hit)">
         <div class="email-subject" v-html="highlightText(hit.subject || '(no subject)', searchQuery)"></div>
         <div v-if="hit.snippet" class="email-snippet" v-html="highlightText(hit.snippet, searchQuery)"></div>
         <div class="email-meta-row">
@@ -67,27 +71,35 @@
       <div v-if="accounts.length === 0" class="card-body">
         <div class="empty-state"><p>No email accounts configured yet.</p></div>
       </div>
-      <div v-for="acct in accounts" :key="acct.id" class="account-item" :class="{syncing: accountSyncStatus(acct.id).syncing}">
+      <div v-for="acct in accounts" :key="acct.id" class="account-item" :class="{syncing: acct.type !== 'PST' && accountSyncStatus(acct.id).syncing}">
         <div class="account-icon">{{ accountIcon(acct.type) }}</div>
         <div class="account-info">
           <div class="account-email">
             {{ acct.email }}
-            <span v-if="accountSyncStatus(acct.id).syncing" class="badge badge-syncing">
+            <span v-if="acct.type !== 'PST' && accountSyncStatus(acct.id).syncing" class="badge badge-syncing">
               <span class="spinner spinner-sm"></span> syncing
             </span>
-            <span v-if="accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="badge badge-error">error</span>
+            <span v-if="acct.type !== 'PST' && accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="badge badge-error">error</span>
           </div>
           <div class="account-meta">
             <span :class="accountTypeBadge(acct.type)">{{ acct.type }}</span>
-            <span v-if="acct.host">{{ acct.host }}:{{ acct.port }}</span>
-            <span>Every {{ acct.sync.interval }}</span>
+            <span v-if="acct.type === 'PST'">Import only</span>
+            <span v-else>
+              <span v-if="acct.host">{{ acct.host }}:{{ acct.port }}</span>
+              <span>Every {{ acct.sync.interval }}</span>
+            </span>
           </div>
-          <div v-if="accountSyncStatus(acct.id).progress && accountSyncStatus(acct.id).syncing" class="account-progress">{{ accountSyncStatus(acct.id).progress }}</div>
-          <div v-if="accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="account-error">{{ accountSyncStatus(acct.id).last_error }}</div>
+          <div v-if="acct.type !== 'PST' && accountSyncStatus(acct.id).progress && accountSyncStatus(acct.id).syncing" class="account-progress">{{ accountSyncStatus(acct.id).progress }}</div>
+          <div v-if="acct.type !== 'PST' && accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="account-error">{{ accountSyncStatus(acct.id).last_error }}</div>
         </div>
         <div class="account-actions">
-          <button v-if="accountSyncStatus(acct.id).syncing" class="btn btn-sm btn-danger" @click="stopSync(acct.id)">Stop</button>
-          <button v-else class="btn btn-sm" @click="triggerSync(acct.id)">Sync</button>
+          <template v-if="acct.type === 'PST'">
+            <a href="#/import" class="btn btn-sm" @click.prevent="navigate('#/import')">Import</a>
+          </template>
+          <template v-else>
+            <button v-if="accountSyncStatus(acct.id).syncing" class="btn btn-sm btn-danger" @click="stopSync(acct.id)">Stop</button>
+            <button v-else class="btn btn-sm" @click="triggerSync(acct.id)">Sync</button>
+          </template>
           <button class="btn btn-sm" @click="openEditAccount(acct)">Edit</button>
           <button class="btn btn-sm btn-danger" @click="deleteAccount(acct)">Delete</button>
         </div>

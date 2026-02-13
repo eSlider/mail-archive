@@ -6,14 +6,14 @@ services:
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8090:8090"
     volumes:
       - ./users:/app/users
     environment:
       TZ: Europe/Berlin
-      LISTEN_ADDR: ":8080"
+      LISTEN_ADDR: ":8090"
       DATA_DIR: /app/users
-      BASE_URL: "${BASE_URL:-http://localhost:8080}"
+      BASE_URL: "${BASE_URL:-http://localhost:8090}"
       # OAuth providers (set in .env or shell)
       GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
       GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"

@@ -44,6 +44,14 @@ func NewService(usersDir string, accounts *account.Store) *Service {
 
 // SyncAccount triggers a sync for a single account. Non-blocking; runs in background.
 func (s *Service) SyncAccount(userID, accountID string) error {
+	acct, err := s.accounts.Get(userID, accountID)
+	if err != nil {
+		return err
+	}
+	if acct.Type == model.AccountTypePST {
+		return fmt.Errorf("PST accounts are import-only; use Import to add emails")
+	}
+
 	s.mu.Lock()
 	if e, ok := s.running[accountID]; ok && e != nil {
 		s.mu.Unlock()
@@ -154,6 +162,9 @@ func (s *Service) SyncAll(userID string) error {
 	}
 
 	for _, acct := range accounts {
+		if acct.Type == model.AccountTypePST {
+			continue // PST is import-only
+		}
 		if !acct.Sync.Enabled {
 			continue
 		}

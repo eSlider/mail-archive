@@ -13,8 +13,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Copy source and build.
+# VERSION injected at build time for tagged releases (e.g. 1.0.1).
+ARG VERSION=dev
 COPY . .
-RUN CGO_ENABLED=1 go build -o /mails ./cmd/mails
+RUN CGO_ENABLED=1 go build -ldflags "-X main.version=${VERSION}" -o /mails ./cmd/mails
 
 # Stage 2: Runtime image
 FROM debian:bookworm-slim
@@ -31,12 +33,12 @@ RUN mkdir -p /app/users && chown 1000:1000 /app/users
 USER 1000:1000
 WORKDIR /app
 
-ENV LISTEN_ADDR=":8080" \
+ENV LISTEN_ADDR=":8090" \
     DATA_DIR="/app/users" \
     STATIC_DIR="/app/web/static" \
-    BASE_URL="http://localhost:8080"
+    BASE_URL="http://localhost:8090"
 
-EXPOSE 8080
+EXPOSE 8090
 
 ENTRYPOINT ["tini", "--"]
 CMD ["mails", "serve"]

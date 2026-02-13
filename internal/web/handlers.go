@@ -355,9 +355,12 @@ func handleSyncStatus(syncSvc *sync.Service, accounts *account.Store) http.Handl
 			return
 		}
 
-		statuses := make([]map[string]any, len(accts))
-		for i, acct := range accts {
-			statuses[i] = syncSvc.AccountStatus(userID, acct)
+		var statuses []map[string]any
+		for _, acct := range accts {
+			if acct.Type == model.AccountTypePST {
+				continue // PST is import-only, no sync status
+			}
+			statuses = append(statuses, syncSvc.AccountStatus(userID, acct))
 		}
 		writeJSON(w, http.StatusOK, statuses)
 	}
@@ -369,7 +372,7 @@ func handleSearch(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromContext(r.Context())
 		q := r.URL.Query().Get("q")
-		accountID := r.URL.Query().Get("account_id")
+		accountFilter := r.URL.Query().Get("account_id")
 		limit := queryInt(r, "limit", 50)
 		offset := queryInt(r, "offset", 0)
 
@@ -380,46 +383,54 @@ func handleSearch(cfg Config) http.HandlerFunc {
 			limit = 500
 		}
 
-		// Get account to determine email dir.
 		accts, _ := cfg.Accounts.List(userID)
 		if len(accts) == 0 {
 			writeJSON(w, http.StatusOK, index.SearchResult{Hits: []index.Hit{}})
 			return
 		}
 
-		// If account_id specified, search that account; otherwise search all.
-		var emailDir, indexPath string
-		if accountID != "" {
+		var result index.SearchResult
+
+		if accountFilter != "" {
+			// Single account: search that account only.
+			found := false
 			for _, a := range accts {
-				if a.ID == accountID {
-					emailDir = account.EmailDir(cfg.UsersDir, userID, a)
-					indexPath = account.IndexPath(cfg.UsersDir, userID, a)
+				if a.ID == accountFilter {
+					emailDir := account.EmailDir(cfg.UsersDir, userID, a)
+					indexPath := account.IndexPath(cfg.UsersDir, userID, a)
+					idx, err := index.New(emailDir, indexPath)
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, "index error: "+err.Error())
+						return
+					}
+					if idx.Stats().TotalEmails == 0 {
+						idx.Build()
+					}
+					result = idx.Search(q, offset, limit)
+					idx.Close()
+					for i := range result.Hits {
+						result.Hits[i].AccountID = a.ID
+					}
+					found = true
 					break
 				}
 			}
-		} else if len(accts) > 0 {
-			// Default: first account.
-			emailDir = account.EmailDir(cfg.UsersDir, userID, accts[0])
-			indexPath = account.IndexPath(cfg.UsersDir, userID, accts[0])
+			if !found {
+				writeJSON(w, http.StatusOK, index.SearchResult{Hits: []index.Hit{}})
+				return
+			}
+		} else {
+			// All accounts: search every index.parquet.
+			accountIndices := make([]index.AccountIndex, 0, len(accts))
+			for _, a := range accts {
+				accountIndices = append(accountIndices, index.AccountIndex{
+					ID:        a.ID,
+					IndexPath: account.IndexPath(cfg.UsersDir, userID, a),
+				})
+			}
+			result = index.SearchMulti(accountIndices, q, offset, limit)
 		}
 
-		if emailDir == "" {
-			writeJSON(w, http.StatusOK, index.SearchResult{Hits: []index.Hit{}})
-			return
-		}
-
-		idx, err := index.New(emailDir, indexPath)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "index error: "+err.Error())
-			return
-		}
-		defer idx.Close()
-
-		if idx.Stats().TotalEmails == 0 {
-			idx.Build()
-		}
-
-		result := idx.Search(q, offset, limit)
 		writeJSON(w, http.StatusOK, result)
 	}
 }

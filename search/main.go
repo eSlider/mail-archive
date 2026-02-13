@@ -36,7 +36,7 @@ func envOr(key, fallback string) string {
 
 func main() {
 	emailDir := envOr("EMAILS_DIR", "../emails")
-	listenAddr := envOr("LISTEN_ADDR", ":8080")
+	listenAddr := envOr("LISTEN_ADDR", ":8090")
 	indexPath := envOr("INDEX_PATH", "index.parquet")
 	syncURL = envOr("SYNC_URL", "")
 	qdrantURL := envOr("QDRANT_URL", "")
@@ -109,7 +109,7 @@ Commands:
 Environment:
   EMAILS_DIR       Path to emails directory (default: ../emails)
   INDEX_PATH       Path to Parquet index file (default: index.parquet)
-  LISTEN_ADDR      HTTP listen address (default: :8080)
+  LISTEN_ADDR      HTTP listen address (default: :8090)
   QDRANT_URL       Qdrant gRPC address for similarity search (e.g. qdrant:6334)
   OLLAMA_URL       Ollama API (e.g. http://172.17.0.1:11434 for host from Docker)
   EMBED_MODEL      Ollama embedding model (default: all-minilm)`)

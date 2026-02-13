@@ -32,7 +32,7 @@ go build ./cmd/mails
 ./mails serve
 
 # 3. Open browser and register
-open http://localhost:8080
+open http://localhost:8090
 ```
 
 For Docker:
@@ -40,7 +40,13 @@ For Docker:
 ```bash
 cp .env.example .env   # optional: configure OAuth providers
 docker compose up -d
-open http://localhost:8080
+open http://localhost:8090
+```
+
+Docker images are published to `ghcr.io/eSlider/mail-archive` with SemVer tags (e.g. `v1.0.1`, `1.0.1`) and `latest`. Use a specific version for production:
+
+```bash
+docker pull ghcr.io/eslider/mail-archive:v1.0.1
 ```
 
 ## Configuration
@@ -49,9 +55,9 @@ open http://localhost:8080
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `LISTEN_ADDR` | `:8090` | HTTP listen address |
 | `DATA_DIR` | `./users` | Base directory for user data |
-| `BASE_URL` | `http://localhost:8080` | Public URL for OAuth callbacks |
+| `BASE_URL` | `http://localhost:8090` | Public URL for OAuth callbacks |
 | `GITHUB_CLIENT_ID` | — | GitHub OAuth app client ID |
 | `GITHUB_CLIENT_SECRET` | — | GitHub OAuth app client secret |
 | `GOOGLE_CLIENT_ID` | — | Google OAuth app client ID |
@@ -198,27 +204,27 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full API reference.
 
 ```bash
 # Health check (no auth)
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 
 # Search (requires session cookie)
-curl -b cookies.txt "http://localhost:8080/api/search?q=invoice&limit=20"
+curl -b cookies.txt "http://localhost:8090/api/search?q=invoice&limit=20"
 
 # List accounts
-curl -b cookies.txt http://localhost:8080/api/accounts
+curl -b cookies.txt http://localhost:8090/api/accounts
 
 # Trigger sync
-curl -b cookies.txt -X POST http://localhost:8080/api/sync
+curl -b cookies.txt -X POST http://localhost:8090/api/sync
 
 # Stop a running sync
-curl -b cookies.txt -X POST http://localhost:8080/api/sync/stop   -H 'Content-Type: application/json' -d '{"account_id":"..."}'
+curl -b cookies.txt -X POST http://localhost:8090/api/sync/stop   -H 'Content-Type: application/json' -d '{"account_id":"..."}'
 
 # Import PST/OST file
-curl -b cookies.txt -X POST http://localhost:8080/api/import/pst   -F "file=@archive.pst" -F "title=My Outlook Archive"
+curl -b cookies.txt -X POST http://localhost:8090/api/import/pst   -F "file=@archive.pst" -F "title=My Outlook Archive"
 
 # For newer Outlook OST files, install pst-utils as fallback: apt install pst-utils
 
 # Check import progress
-curl -b cookies.txt http://localhost:8080/api/import/status/{job_id}
+curl -b cookies.txt http://localhost:8090/api/import/status/{job_id}
 ```
 
 ## License
