@@ -13,19 +13,20 @@ emails/
   my-gmail/
     inbox/
       a1b2c3d4e5f67890-4231.eml
-      b2c3d4e5f6789012-4232.eml
-    sent/
-      c3d4e5f6789012345-4240.eml
-    draft/
+    gmail/
+      sent/
+        c3d4e5f6789012345-4240.eml
+      benachrichtigung/
+        kartinatv/
+          0f562bfad5b8b879-2.eml
       ...
   work-imap/
     inbox/
       d4e5f67890123456-1234.eml
-    sent/
-      ...
+    ...
 ```
 
-Each filename is `{checksum}-{external-id}.eml` (checksum=SHA-256 of content; external-id=server UID). File mtime is set from the email's Date header. Folders: inbox, sent, draft, trash, spam.
+Each filename is `{checksum}-{external-id}.eml`. Path preserves IMAP hierarchy: `[Gmail]/Benachrichtigung/Kartina.TV` → `gmail/benachrichtigung/kartina_tv/`.
 
 Each `.eml` is a raw RFC 822 message — openable by any mail client (Thunderbird, mutt, etc.).
 
@@ -171,6 +172,12 @@ python scripts/migrate_to_folders.py
 ```bash
 python scripts/migrate_checksum_names.py --dry-run
 python scripts/migrate_checksum_names.py
+```
+
+**To hierarchical folder structure (flat slug → gmail/benachrichtigung/kartinatv):**
+```bash
+python scripts/migrate_hierarchical_folders.py --dry-run
+python scripts/migrate_hierarchical_folders.py
 ```
 
 ## Email search

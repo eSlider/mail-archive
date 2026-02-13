@@ -2,7 +2,7 @@
 
 ## Project Context
 
-This is a **local email archival tool** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) into a folder-based structure: `emails/{account}/{inbox|sent|draft|...}/{checksum}-{external-id}.eml`. Checksum is SHA-256 of content; file mtime is set from the email Date header. It runs as a Docker container with a Python daemon that periodically syncs based on YAML configs.
+This is a **local email archival tool** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) into a hierarchical structure: `emails/{account}/{path}/{checksum}-{external-id}.eml`. Path preserves IMAP folder hierarchy (e.g. `[Gmail]/Benachrichtigung/Kartina.TV` → `gmail/benachrichtigung/kartina_tv/`). Checksum is SHA-256 of content; file mtime from Date header.
 
 ## Architecture
 

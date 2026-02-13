@@ -20,7 +20,8 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 DATE_DIR_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-FOLDER_NAMES = {"inbox", "sent", "draft", "trash", "spam", "allmail", "outbox"}
+# Top-level dirs that are part of folder structure (skip migrating into them)
+FOLDER_NAMES = {"inbox", "sent", "draft", "trash", "spam", "allmail", "outbox", "gmail"}
 
 
 def _migrate_to_inbox(filepath: Path, inbox_dir: Path, dry_run: bool) -> bool:

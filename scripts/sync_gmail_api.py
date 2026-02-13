@@ -12,14 +12,14 @@ from eml_utils import content_checksum, set_file_received_time
 
 logger = logging.getLogger(__name__)
 
-# Gmail label IDs -> our dir names
+# Gmail label IDs -> hierarchical path (matches IMAP [Gmail]/... structure)
 GMAIL_LABEL_MAP: dict[str, str] = {
     "INBOX": "inbox",
-    "SENT": "sent",
-    "DRAFT": "draft",
-    "TRASH": "trash",
-    "SPAM": "spam",
-    "UNREAD": "unread",  # Usually combined with others
+    "SENT": "gmail/sent",
+    "DRAFT": "gmail/draft",
+    "TRASH": "gmail/trash",
+    "SPAM": "gmail/spam",
+    "UNREAD": "gmail/unread",
 }
 
 
@@ -91,14 +91,14 @@ def sync_gmail_api_account(
     service = _get_gmail_service(account_name, cfg, secrets_dir)
 
     for label_id in labels:
-        folder_dir = GMAIL_LABEL_MAP.get(label_id, label_id.lower().replace("-", "_"))
-        folder_path = account_dir / folder_dir
+        rel_path = GMAIL_LABEL_MAP.get(label_id, "gmail/" + label_id.lower().replace("-", "_"))
+        folder_path = account_dir / rel_path
         state_file = folder_path / ".sync_state"
         synced_ids = _load_synced_ids(state_file)
 
         # Migrate legacy .sync_state to inbox/
         old_state = account_dir / ".sync_state"
-        if folder_dir == "inbox" and not state_file.exists() and old_state.exists():
+        if rel_path == "inbox" and not state_file.exists() and old_state.exists():
             folder_path.mkdir(parents=True, exist_ok=True)
             state_file.write_text(old_state.read_text())
             synced_ids = _load_synced_ids(state_file)
@@ -126,13 +126,13 @@ def sync_gmail_api_account(
 
         new_ids = [mid for mid in all_msg_ids if mid not in synced_ids]
         if not new_ids:
-            logger.info("Gmail '%s' %s: no new messages", account_name, folder_dir)
+            logger.info("Gmail '%s' %s: no new messages", account_name, rel_path)
             continue
 
         logger.info(
             "Gmail '%s' %s: %d new messages to download",
             account_name,
-            folder_dir,
+            rel_path,
             len(new_ids),
         )
 

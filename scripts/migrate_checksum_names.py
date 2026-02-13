@@ -86,12 +86,9 @@ def main() -> int:
     for account_dir in sorted(base.iterdir()):
         if not account_dir.is_dir() or account_dir.name.startswith("."):
             continue
-        for folder_dir in sorted(account_dir.iterdir()):
-            if not folder_dir.is_dir():
-                continue
-            for filepath in list(folder_dir.iterdir()):
-                if migrate_file(filepath, args.dry_run):
-                    total += 1
+        for filepath in account_dir.rglob("*.eml"):
+            if migrate_file(filepath, args.dry_run):
+                total += 1
 
     print(f"Total: {total} files migrated")
     return 0

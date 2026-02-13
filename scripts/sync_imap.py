@@ -12,7 +12,7 @@ from typing import Any
 from imapclient import IMAPClient
 
 from eml_utils import content_checksum, set_file_received_time
-from folder_mapping import imap_folder_to_dir
+from folder_mapping import imap_folder_to_path
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ def sync_imap_account(account_name: str, cfg: dict[str, Any], base_dir: Path) ->
             state_file = folder_path / ".sync_state"
             old_state = account_dir / ".sync_state"
             # Migrate legacy flat .sync_state to inbox/.sync_state
-            if folder_dir == "inbox" and not state_file.exists() and old_state.exists():
+            if rel_path == "inbox" and not state_file.exists() and old_state.exists():
                 folder_path.mkdir(parents=True, exist_ok=True)
                 state_file.write_text(old_state.read_text())
                 logger.info("Migrated legacy .sync_state to inbox/")
@@ -104,13 +104,13 @@ def sync_imap_account(account_name: str, cfg: dict[str, Any], base_dir: Path) ->
             new_uids = [uid for uid in all_uids if uid not in synced_uids]
 
             if not new_uids:
-                logger.info("Folder '%s' (%s): no new messages", folder, folder_dir)
+                logger.info("Folder '%s' (%s): no new messages", folder, rel_path)
                 continue
 
             logger.info(
                 "Folder '%s' (%s): %d new messages to download",
                 folder,
-                folder_dir,
+                rel_path,
                 len(new_uids),
             )
 
