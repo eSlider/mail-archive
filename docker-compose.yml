@@ -1,67 +1,43 @@
 services:
-  mail-sync:
+  # Mail Archive — main application (Go)
+  mails:
     build: .
-    container_name: mail-sync
+    container_name: mails
     user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
     restart: unless-stopped
     ports:
-      - "8081:8081"
+      - "8080:8080"
     volumes:
-      - ./config:/app/config:ro
-      - ./emails:/app/emails
-      - ./secrets:/app/secrets
+      - ./users:/app/users
     environment:
       TZ: Europe/Berlin
-      LOG_LEVEL: INFO
-      EMAILS_DIR: /app/emails
-      CONFIG_DIR: /app/config
-      SECRETS_DIR: /app/secrets
-      SYNC_API_PORT: "8081"
-
-  # One-off sync for a single account (e.g. docker compose run sync-one eslider-gmail)
-  sync-one:
-    build: .
-    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
-    volumes:
-      - ./config:/app/config:ro
-      - ./emails:/app/emails
-      - ./secrets:/app/secrets
-    environment:
-      TZ: Europe/Berlin
-      EMAILS_DIR: /app/emails
-      CONFIG_DIR: /app/config
-      SECRETS_DIR: /app/secrets
-    entrypoint: ["python", "/app/scripts/sync_one.py"]
-
-  # Email search UI + API (Go)
-  mail-search:
-    build: ./search
-    container_name: mail-search
-    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
-    restart: unless-stopped
-    depends_on:
-      - qdrant
-    network_mode: host
-    volumes:
-      - ./emails:/app/emails:ro
-      - ./data:/app/data
-    environment:
-      TZ: Europe/Berlin
-      EMAILS_DIR: /app/emails
-      INDEX_PATH: /app/data/index.parquet
       LISTEN_ADDR: ":8080"
-      SYNC_URL: "http://127.0.0.1:8081"
+      DATA_DIR: /app/users
+      BASE_URL: "${BASE_URL:-http://localhost:8080}"
+      # OAuth providers (set in .env or shell)
+      GITHUB_CLIENT_ID: "${GITHUB_CLIENT_ID:-}"
+      GITHUB_CLIENT_SECRET: "${GITHUB_CLIENT_SECRET:-}"
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+      FACEBOOK_CLIENT_ID: "${FACEBOOK_CLIENT_ID:-}"
+      FACEBOOK_CLIENT_SECRET: "${FACEBOOK_CLIENT_SECRET:-}"
+      # Similarity search (optional)
       QDRANT_URL: "http://127.0.0.1:6334"
       OLLAMA_URL: "http://172.17.0.1:11434"
       EMBED_MODEL: "all-minilm"
+    network_mode: host
     develop:
       watch:
         - action: rebuild
-          path: ./search
+          path: .
           ignore:
-            - mail-search
+            - users/
+            - scripts/
+            - emails/
+            - data/
+            - "*.md"
 
-  # Vector DB for similarity search (requires Ollama + embedding model)
+  # Vector DB for similarity search (optional)
   qdrant:
     image: qdrant/qdrant:latest
     container_name: qdrant
@@ -72,19 +48,7 @@ services:
       - "6333:6333"
       - "6334:6334"
 
-  # Embedding model: use host Ollama at 172.17.0.1 (Docker bridge gateway).
-  # On host: OLLAMA_HOST=0.0.0.0 ollama serve  (to accept connections from containers)
-  # Run: ollama pull all-minilm
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: ollama
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   ports:
-  #     - "11435:11434"
-
-  # Test IMAP/SMTP server — use with: docker compose --profile test up
+  # Test IMAP/POP3/SMTP server — use with: docker compose --profile test up
   greenmail:
     image: greenmail/standalone:2.1.2
     container_name: greenmail
@@ -92,10 +56,10 @@ services:
       GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled"
     ports:
       - "3025:3025"   # SMTP
+      - "3110:3110"   # POP3
       - "3143:3143"   # IMAP
     profiles:
       - test
 
 volumes:
   qdrant_storage:
-  # ollama_data:

@@ -2,102 +2,111 @@
 
 ## Project Context
 
-This is a **local email archival tool** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) into a hierarchical structure: `emails/{account}/{path}/{checksum}-{external-id}.eml`. Path preserves IMAP folder hierarchy (e.g. `[Gmail]/Benachrichtigung/Kartina.TV` → `gmail/benachrichtigung/kartina_tv/`). Checksum is SHA-256 of content; file mtime from Date header.
+This is a **multi-user email archival system** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) per user into a hierarchical structure: `users/{uuid}/{domain}/{local}/{folder}/{checksum}-{id}.eml`. Users authenticate via OAuth2 (GitHub, Google, Facebook). All IDs are UUIDv7.
 
 ## Architecture
 
 ```
 mails/
-├── config/          # Per-account YAML configs (*.yml)
-├── emails/          # Downloaded .eml files (inbox/, sent/, draft/ per account)
-├── secrets/         # OAuth tokens, credentials.json
-├── scripts/
-│   ├── daemon.py          # Main scheduler loop
-│   ├── config_loader.py   # YAML config parsing
-│   ├── sync_imap.py       # IMAP sync module
-│   ├── sync_pop3.py       # POP3 sync module
-│   └── sync_gmail_api.py  # Gmail API sync module
+├── cmd/mails/           # Application entry point
+├── internal/
+│   ├── auth/            # OAuth2 login + session management
+│   ├── user/            # User CRUD (users/{uuid}/)
+│   ├── account/         # Per-user email account configs
+│   ├── model/           # Shared types (User, Account, SyncJob)
+│   ├── sync/            # Sync orchestration
+│   │   ├── imap/        # IMAP protocol
+│   │   ├── pop3/        # POP3 protocol
+│   │   └── gmail/       # Gmail API
+│   ├── search/
+│   │   ├── eml/         # .eml parser
+│   │   ├── index/       # DuckDB + Parquet
+│   │   └── vector/      # Qdrant + Ollama
+│   └── web/             # Chi HTTP router + handlers
+├── web/
+│   ├── static/          # CSS, JS (local jQuery + Vue.js)
+│   └── templates/       # Go HTML templates
+├── users/               # Per-user data (gitignored)
+├── scripts/             # Legacy Python scripts (reference)
 ├── docker-compose.yml
 ├── Dockerfile
-└── requirements.txt
+└── go.mod
 ```
 
 ## Key Design Decisions
 
-- **UID-based dedup for IMAP** — `.sync_state` tracks downloaded UIDs per account
-- **SHA-256 hash dedup for POP3** — POP3 protocol lacks stable UIDs
-- **Message ID dedup for Gmail API** — uses Gmail's native message IDs
-- **Storage: raw .eml** — preserves original RFC822 format, parseable by any mail client
-- **No database** — state is a plain text file per account, emails are plain files
+- **Multi-user** — each user has isolated data under `users/{uuid}/`
+- **OAuth-only auth** — no password-based registration
+- **UUIDv7 IDs** — time-ordered for all entities
+- **SHA-256 dedup** — content checksums prevent duplicate emails
+- **SQLite per user** — sync state in `sync.sqlite`
+- **Raw .eml storage** — preserves RFC 822 format
+- **No CDN** — jQuery and Vue.js served locally
+- **Go backend** — single binary, Chi router
+- **NEVER delete emails** from server — sync is read-only
+
+## Package Dependencies
+
+```
+cmd → internal/web → internal/sync → internal/model
+                   → internal/auth
+                   → internal/user
+                   → internal/account
+                   → internal/search
+```
+
+## Coding Guidelines
+
+- **NEVER REMOVE EMAILS** from server
+- **Go 1.25+**, strict typing
+- **No classes unless necessary** — prefer pure functions
+- **Minimal dependencies** — stdlib first
+- **Comments in English only**
+- **Test first** — write the test, then implement
+- All user data in `users/{uuid}/`
+- Keep sync modules independent — each handles one protocol
+- Log everything at INFO level, errors with full tracebacks
+- Frontend: jQuery + Vue.js, plain JavaScript (no TypeScript)
+- Use snake_case import aliases for disambiguation
 
 ## Next Steps (Priority Order)
 
 ### 1. Tests (High Priority)
 
-Write unit tests using `pytest`. Key areas:
-- `config_loader.py`: interval parsing, validation, error handling
-- `sync_imap.py`: mock `IMAPClient`, verify file creation and state tracking
-- `sync_pop3.py`: mock `poplib`, verify hash dedup logic
-- `sync_gmail_api.py`: mock Google API client
-- Add a `tests/` directory, update `requirements.txt` with `pytest`
-- Integration test: add a GreenMail (Java IMAP/POP3/SMTP test server) service to `docker-compose.yml` for end-to-end testing
+Write unit tests using `go test`. Key areas:
+- `internal/auth/`: session create/get/delete, token generation
+- `internal/user/`: FindOrCreate, directory creation
+- `internal/account/`: CRUD operations, YAML serialization
+- `internal/sync/state.go`: SQLite state tracking
+- `internal/search/eml/`: existing parser tests (migrate from search/)
+- `internal/search/index/`: existing index tests (migrate from search/)
+- Integration: GreenMail for end-to-end IMAP/POP3 testing
 
-### 2. Thunderbird Import (Medium Priority)
+### 2. Gmail API Sync (Medium Priority)
 
-Read emails from local Thunderbird profile (`~/.thunderbird/<profile>/ImapMail/` or `Mail/`):
-- Parse mbox files using Python's `mailbox.mbox`
-- Parse Maildir using `mailbox.Maildir`
-- Create a new sync type `THUNDERBIRD` in `config_loader.py`
-- Config should point to the Thunderbird profile path
-- Add volume mount in `docker-compose.yml` for Thunderbird profile (read-only)
+Complete the Gmail API sync implementation in `internal/sync/gmail/`:
+- OAuth2 token management using `golang.org/x/oauth2/google`
+- Gmail API client for message listing and raw RFC822 fetch
+- Label → filesystem path mapping
+- Device code flow for headless Docker environments
 
-### 3. Gmail OAuth2 Headless Flow (Medium Priority)
+### 3. Search Per User/Account (Medium Priority)
 
-Current OAuth2 flow uses `run_local_server()` which requires a browser. For Docker:
-- Implement device code flow (`flow.run_console()`) as alternative
-- Or: create a one-time `scripts/authorize_gmail.py` CLI tool that runs on the host, saves token to `secrets/`, then the container reuses it
-- Document the setup steps in README
+Refactor search to work per-user:
+- Index emails per account into `users/{uuid}/{domain}/{local}/index.parquet`
+- Cross-account search within a single user
+- Cache indices in memory with LRU eviction
 
-### 4. Attachment Extraction (Low Priority)
+### 4. Scheduled Sync (Medium Priority)
 
-After downloading `.eml`, optionally extract attachments:
-- Add `extract_attachments: true` config option
-- Store in `emails/{account}/attachments/{filename}`
-- Use Python's `email` stdlib to walk MIME parts
-- Skip inline images unless configured otherwise
+Implement periodic sync based on account `sync.interval`:
+- Background goroutine per user with ticker
+- Structured JSONL logs in `users/{uuid}/logs/`
+- Health endpoint with per-account sync status
 
-### 5. Full-Text Search Index (Low Priority)
+### 5. Data Migration (Low Priority)
 
-Enable searching across all downloaded emails:
-- Option A: SQLite FTS5 index (lightweight, no extra service)
-- Option B: Add a Meilisearch/Typesense container to `docker-compose.yml`
-- Index: sender, recipient, subject, body text, date
-- Provide a CLI query tool: `scripts/search.py "keyword"`
-
-### 6. Web UI for Browsing (Low Priority)
-
-Add a lightweight web interface:
-- FastAPI or Flask backend serving the `emails/` directory
-- Parse `.eml` files on-the-fly for display
-- Simple HTML/CSS viewer (no heavy JS frameworks needed)
-- Add as a second service in `docker-compose.yml`
-- Search integration if index exists
-
-### 7. Health Check & Monitoring (Low Priority)
-
-- Add a `/health` HTTP endpoint (tiny HTTP server in daemon)
-- Report: last sync time per account, message counts, errors
-- Add `healthcheck` to `docker-compose.yml`
-- Optional: webhook notifications on sync failure
-
-## Coding Guidelines
-
-- NEVER REMOVE EMAILS from server.
-- **Python 3.12+**, strict typing with `from __future__ import annotations`
-- **No classes unless necessary** — prefer pure functions
-- **Minimal dependencies** — stdlib first, then well-maintained PyPI packages
-- **Comments in English only**
-- **Test first** — write the test, then implement
-- All configs in YAML, all state in plain text files
-- Keep sync modules independent — each handles one protocol
-- Log everything at INFO level, errors with full tracebacks
+Migrate existing `emails/` data to new `users/{uuid}/` structure:
+- Script to create user, import accounts from `config/*.yml`
+- Move `.eml` files to new path format
+- Convert `.sync_state` files to SQLite entries

@@ -1,8 +1,14 @@
-# Synced emails (large data, keep local)
+# User data (per-user emails, indices, state)
+users/
+
+# Legacy synced emails
 emails/
 
 # Secrets and credentials
 secrets/
+.env
+
+# Per-account configs (contain passwords)
 config/*
 !config/example.yml
 
@@ -10,16 +16,35 @@ config/*
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+venv/
 
 # Docker
 .docker/
 
-# Go binaries
+# Go binaries and build output
+/mails
 search/mail-search
 
-# Index data
+# Index / search data
 data/
 *.parquet
 
-# Editor swap
+# SQLite databases
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Sync state (legacy)
+.sync_state*
+
+# IDE / editor
 *.swp
+*~
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install C dependencies (CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc g++
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          diff=$(gofmt -l .)
+          if [ -n "$diff" ]; then
+            echo "Files not formatted:"
+            echo "$diff"
+            exit 1
+          fi
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install C dependencies (CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc g++
+
+      - name: Run unit tests
+        run: CGO_ENABLED=1 go test -race -count=1 -timeout 120s ./internal/...
+
+  test-e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    services:
+      greenmail:
+        image: greenmail/standalone:2.1.2
+        env:
+          GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled"
+        ports:
+          - 3025:3025
+          - 3110:3110
+          - 3143:3143
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install C dependencies (CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc g++
+
+      - name: Wait for GreenMail
+        run: |
+          for i in $(seq 1 30); do
+            nc -z localhost 3143 && nc -z localhost 3025 && nc -z localhost 3110 && break
+            echo "Waiting for GreenMail... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run e2e tests (DuckDB index + IMAP/POP3 sync)
+        run: |
+          CGO_ENABLED=1 go test -race -count=1 -timeout 300s \
+            -tags e2e \
+            -run 'TestIMAP|TestPOP3|TestIndex' \
+            ./tests/e2e/...
+        env:
+          GREENMAIL_HOST: localhost
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Install C dependencies (CGO)
+        run: sudo apt-get update && sudo apt-get install -y gcc g++
+
+      - name: Build binary
+        run: CGO_ENABLED=1 go build -o mails ./cmd/mails
+
+      - name: Verify binary
+        run: ./mails version || ./mails --help || true

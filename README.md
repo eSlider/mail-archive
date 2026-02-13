@@ -1,295 +1,163 @@
-# mails
+# Mail Archive
 
-Local email archival tool. Syncs emails from multiple accounts (IMAP, POP3, Gmail API) into a plain file structure, runs as a Docker container on a schedule.
+Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem. **Never deletes or marks emails as read.**
 
-## Result structure
+## Features
 
-```
-config/
-  my-gmail.yml            # one YAML per account
-  work-imap.yml
+- **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
+- **Multi-account** — each user manages their own email accounts
+- **Protocol support** — IMAP, POP3, Gmail API
+- **Deduplication** — SHA-256 content checksums prevent duplicate storage
+- **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
+- **UUIDv7 IDs** — time-ordered identifiers for all entities
+- **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
+- **Per-user isolation** — all data under `users/{uuid}/`
 
-emails/
-  my-gmail/
-    inbox/
-      a1b2c3d4e5f67890-4231.eml
-    gmail/
-      sent/
-        c3d4e5f6789012345-4240.eml
-      benachrichtigung/
-        kartinatv/
-          0f562bfad5b8b879-2.eml
-      ...
-  work-imap/
-    inbox/
-      d4e5f67890123456-1234.eml
-    ...
-```
-
-Each filename is `{checksum}-{external-id}.eml`. Path preserves IMAP hierarchy: `[Gmail]/Benachrichtigung/Kartina.TV` → `gmail/benachrichtigung/kartina_tv/`.
-
-Each `.eml` is a raw RFC 822 message — openable by any mail client (Thunderbird, mutt, etc.).
-
-## Quick start
-
-Prerequisites: Docker and Docker Compose.
+## Quick Start
 
 ```bash
-# 1. Create config for your account
-cp config/example.yml config/my-gmail.yml
-nano config/my-gmail.yml
+# 1. Clone and build
+git clone https://github.com/eSlider/mails.git
+cd mails
+go build ./cmd/mails
 
-# 2. Ensure emails dir is writable by the container
-mkdir -p emails && (sudo chown -R $(id -u):$(id -g) emails 2>/dev/null || true)
+# 2. Run
+./mails serve
 
-# 3. Start the sync daemon (or run one-off sync)
+# 3. Open browser and register
+open http://localhost:8080
+```
+
+For Docker:
+
+```bash
+cp .env.example .env   # optional: configure OAuth providers
 docker compose up -d
-
-# 4. Watch logs
-docker compose logs -f mail-sync
+open http://localhost:8080
 ```
 
-### One-off sync (single account)
+## Configuration
 
-```bash
-# Sync just one account (e.g. eslider-gmail)
-docker compose run --rm sync-one eslider-gmail
-```
-
-Use your host UID/GID so files are owned correctly:
-```bash
-DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) docker compose run --rm sync-one eslider-gmail
-```
-
-## Account config
-
-Each file in `config/` is a YAML describing one mail account. The config loader picks up every `*.yml` file (except `example.yml`).
-
-### IMAP
-
-```yaml
-type: IMAP
-email: user@gmail.com
-password: your-app-password
-host: imap.gmail.com
-port: 993
-ssl: true
-folders:
-  - INBOX
-  - "[Gmail]/Sent Mail"
-  - "[Gmail]/All Mail"
-sync:
-  interval: 5m
-```
-
-### POP3
-
-```yaml
-type: POP3
-email: user@example.com
-password: your-password
-host: pop.example.com
-port: 995
-ssl: true
-sync:
-  interval: 10m
-```
-
-### Gmail API (OAuth2)
-
-```yaml
-type: GMAIL_API
-email: user@gmail.com
-credentials_file: /app/secrets/credentials.json
-sync:
-  interval: 5m
-```
-
-Setup steps for Gmail API:
-
-1. Create a project at [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable the **Gmail API**
-3. Create **OAuth 2.0 Client ID** credentials (Desktop app)
-4. Download `credentials.json` into the `secrets/` directory
-5. On first run the daemon will open a browser for authorization; the resulting token is saved to `secrets/` and reused automatically
-
-### Sync interval format
-
-The `interval` field accepts combinations of: `30s`, `5m`, `1h`, `1d` (e.g. `1h30m`). Default is `5m`.
-
-## Gmail with App Password (IMAP)
-
-Simplest way to sync Gmail — no API project needed:
-
-1. Enable 2-Step Verification on your Google account
-2. Go to <https://myaccount.google.com/apppasswords>
-3. Generate an app password for "Mail"
-4. Use it as `password` in an IMAP config with `host: imap.gmail.com`
-
-## Environment variables (sync service)
-
-Set in `docker-compose.yml` under `environment`:
+### Environment Variables
 
 | Variable | Default | Description |
-|---|---|---|
-| `TZ` | `Europe/Berlin` | Container timezone |
-| `LOG_LEVEL` | `INFO` | Python log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
-| `EMAILS_DIR` | `/app/emails` | Email storage path inside container |
-| `CONFIG_DIR` | `/app/config` | Config directory path inside container |
-| `SECRETS_DIR` | `/app/secrets` | Secrets directory path inside container |
-| `SYNC_API_PORT` | `8081` | Port for the sync trigger HTTP API |
-
-## How sync works
-
-- **IMAP** — tracks downloaded UIDs in a `.sync_state` file per account; only fetches new messages on each run
-- **POP3** — POP3 has no stable UIDs, so messages are deduplicated by SHA-256 hash of the raw content
-- **Gmail API** — uses Gmail's native message IDs for deduplication
-
-All state is plain text files inside the account's `emails/{account}/` directory. No database required.
-
-## Run sync for a single account
-
-```bash
-# From project root (use venv or docker)
-python scripts/sync_one.py eslider-gmail
-```
-
-## Migrating existing emails
-
-**From date subdirs to flat:** `emails/{account}/{date}/{id}_{subject}.eml` → flat
-```bash
-python scripts/migrate_flat_emails.py --dry-run
-python scripts/migrate_flat_emails.py
-```
-
-**From flat to folder structure:** flat files → `emails/{account}/inbox/`
-```bash
-python scripts/migrate_to_folders.py --dry-run
-python scripts/migrate_to_folders.py
-```
-
-**To new naming ({checksum}-{id}.eml) and set mtime from Date header:**
-```bash
-python scripts/migrate_checksum_names.py --dry-run
-python scripts/migrate_checksum_names.py
-```
-
-**To hierarchical folder structure (flat slug → gmail/benachrichtigung/kartinatv):**
-```bash
-python scripts/migrate_hierarchical_folders.py --dry-run
-python scripts/migrate_hierarchical_folders.py
-```
-
-## Email search
-
-A Go application (`search/`) indexes all `.eml` files into a DuckDB-backed index (persisted as Parquet with zstd compression) and provides full-text search via CLI and a web UI.
-
-Features:
-- **Case-insensitive substring search** across subject and body text
-- **Semantic similarity search** — vector search via Qdrant + Ollama embeddings (optional)
-- **Checksum-based deduplication** — same email in inbox/allmail/sent is indexed once
-- **Persistent Parquet index** — first run parses all `.eml` files (~17s for 34k emails), subsequent starts load from Parquet in ~1s
-- **Paginated results** with highlighted snippets
-- **Email detail view** with HTML rendering, plain text, and attachment list
-- **Charset decoding** — handles KOI8-R, ISO-8859-1, Windows-1252 and other legacy encodings in headers and bodies
-- **Sync trigger button** — trigger email sync from the web UI (requires `mail-sync` container)
-- **Auto-reindex** after sync completes
-- **Live development** with `docker compose watch`
-
-### CLI usage
-
-```bash
-cd search
-go build -o mail-search .
-
-# Search by subject and body
-./mail-search search "invoice"
-
-# Show index stats
-./mail-search stats
-
-# Start HTTP server with web UI on :8080
-./mail-search serve
-```
-
-### Docker
-
-The search service is included in `docker-compose.yml`:
-
-```bash
-# Start the search UI (with Qdrant + Ollama for similarity search)
-docker compose up -d qdrant ollama mail-search
-
-# Pull the embedding model once (sentence-transformers/all-MiniLM-L6-v2, 384 dims, ~90MB)
-ollama pull all-minilm
-
-# Open http://localhost:8080
-# Use the "Similarity" toggle for semantic search
-
-# Auto-rebuild on Go source changes
-docker compose watch mail-search
-```
-
-### Similarity search (Qdrant + Ollama)
-
-When `QDRANT_URL` and `OLLAMA_URL` are set, the web UI shows a **Keyword** / **Similarity** toggle. Similarity search uses Qdrant to find semantically related emails based on subject and body embeddings from Ollama's `all-minilm` (sentence-transformers/all-MiniLM-L6-v2) model. On reindex, both the Parquet index and the vector index are rebuilt.
-
-**Model switching:** Set `EMBED_MODEL` to any Ollama embedding model (e.g. `theepicdev/nomic-embed-text:v1.5-q6_K` for 768 dims). Dimension is detected automatically; the Qdrant collection is recreated when it mismatches. Reindex after switching to repopulate. See [Measurements.md](Measurements.md) for throughput and latency.
-
-### Environment variables (search service)
-
-| Variable | Default | Description |
-|---|---|---|
-| `EMAILS_DIR` | `../emails` | Path to emails directory |
-| `INDEX_PATH` | `index.parquet` | Path to Parquet index file (zstd compressed) |
+|----------|---------|-------------|
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
-| `SYNC_URL` | _(empty)_ | URL of the sync trigger API (e.g. `http://mail-sync:8081`) |
-| `QDRANT_URL` | _(empty)_ | Qdrant gRPC address for similarity search (e.g. `qdrant:6334`) |
-| `OLLAMA_URL` | _(empty)_ | Ollama API for embeddings. Use `http://172.17.0.1:11434` for host Ollama from containers. Set `OLLAMA_HOST=0.0.0.0` on the host so Ollama accepts connections. |
-| `EMBED_MODEL` | `all-minilm` | Ollama embedding model (sentence-transformers/all-MiniLM-L6-v2, 384 dims) |
+| `DATA_DIR` | `./users` | Base directory for user data |
+| `BASE_URL` | `http://localhost:8080` | Public URL for OAuth callbacks |
+| `GITHUB_CLIENT_ID` | — | GitHub OAuth app client ID |
+| `GITHUB_CLIENT_SECRET` | — | GitHub OAuth app client secret |
+| `GOOGLE_CLIENT_ID` | — | Google OAuth app client ID |
+| `GOOGLE_CLIENT_SECRET` | — | Google OAuth app client secret |
+| `FACEBOOK_CLIENT_ID` | — | Facebook OAuth app client ID |
+| `FACEBOOK_CLIENT_SECRET` | — | Facebook OAuth app client secret |
+| `QDRANT_URL` | — | Qdrant gRPC address for similarity search |
+| `OLLAMA_URL` | — | Ollama API URL for embeddings |
+| `EMBED_MODEL` | `all-minilm` | Embedding model name |
 
-### HTTP API
+### OAuth Setup (Optional)
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/search?q=keyword&limit=50&offset=0&mode=similarity` | GET | Search emails. `mode=similarity` uses vector search when available. Default: keyword (substring in subject + body) |
-| `/api/email?path=account/inbox/file.eml` | GET | Get full email content for preview |
-| `/api/stats` | GET | Index statistics |
-| `/api/reindex` | POST | Rebuild index from `.eml` files and save to Parquet |
-| `/api/accounts` | GET | List configured sync accounts and their status |
-| `/api/sync` | POST | Trigger email sync (all accounts or `{"account":"name"}`) |
-| `/health` | GET | Health check |
+OAuth is not required. Users can register with email + password by default.
 
-## Project structure
+To enable OAuth login, configure one or more providers:
+
+1. **GitHub:** Create an OAuth App at [github.com/settings/applications/new](https://github.com/settings/applications/new). Set callback URL to `{BASE_URL}/auth/github/callback`.
+
+2. **Google:** Create credentials at [console.cloud.google.com](https://console.cloud.google.com/apis/credentials). Set redirect URI to `{BASE_URL}/auth/google/callback`.
+
+3. **Facebook:** Create an app at [developers.facebook.com](https://developers.facebook.com/apps/). Set redirect URI to `{BASE_URL}/auth/facebook/callback`.
+
+## User Data Layout
 
 ```
-mails/
-├── config/                  # Account configs (*.yml)
-│   └── example.yml          # Template — copy and edit
-├── emails/                  # Downloaded .eml files (gitignored)
-├── data/                    # Parquet index (gitignored)
-├── secrets/                 # OAuth tokens, credentials.json (gitignored)
-├── scripts/
-│   ├── daemon.py            # Main scheduler loop
-│   ├── sync_api.py          # HTTP trigger API for on-demand sync
-│   ├── config_loader.py     # YAML config parser + validator
-│   ├── sync_imap.py         # IMAP sync via IMAPClient
-│   ├── sync_pop3.py         # POP3 sync via stdlib poplib
-│   └── sync_gmail_api.py    # Gmail API sync via google-api-python-client
-├── search/                  # Go search application
-│   ├── main.go              # CLI + HTTP server + web UI
-│   ├── eml/parser.go        # .eml parser with charset decoding
-│   ├── index/index.go       # DuckDB index with Parquet persistence
-│   ├── Dockerfile
-│   ├── go.mod
-│   └── go.sum
-├── docker-compose.yml
-├── Dockerfile               # Python sync daemon
-└── requirements.txt
+users/
+  019c56a4-a9ef-79bd-b53a-ef7a080d9c90/
+    user.json                    # User metadata
+    accounts.yml                 # Email account configs
+    sync.sqlite                  # Sync state database
+    logs/                        # Structured sync logs
+    gmail.com/
+      eslider/
+        inbox/
+          a1b2c3d4e5f67890-12345.eml
+        gmail/
+          sent/
+            b2c3d4e5f6789012-12346.eml
+        index.parquet            # Search index
+```
+
+## Architecture
+
+```
+cmd/mails/         → Entry point, CLI
+internal/
+  auth/            → OAuth2 (GitHub, Google, Facebook), sessions
+  user/            → User storage (users/{uuid}/)
+  account/         → Email account CRUD (accounts.yml)
+  model/           → Shared types (User, Account, SyncJob)
+  sync/            → Sync orchestration
+    imap/          → IMAP protocol sync
+    pop3/          → POP3 protocol sync
+    gmail/         → Gmail API sync
+  search/
+    eml/           → .eml parser (charset, MIME, attachments)
+    index/         → DuckDB search index → Parquet
+    vector/        → Qdrant similarity search
+  web/             → Chi router, HTTP handlers
+web/
+  static/          → CSS, JS (jQuery, Vue.js — all local, no CDN)
 ```
 
 ## Development
 
-- [TODO.md](TODO.md) — current status and open tasks
-- [AGENTS.md](AGENTS.md) — architecture decisions and coding guidelines
-- [CONTRIBUTING.md](CONTRIBUTING.md) — API examples, Qdrant verification, similarity search
+```bash
+# Build
+go build ./cmd/mails
+
+# Run locally
+DATA_DIR=./users ./mails serve
+
+# Run unit tests
+go test ./...
+
+# Run e2e tests (requires GreenMail + Qdrant + Ollama)
+docker compose --profile test up -d greenmail
+go test -tags e2e -v ./tests/e2e/
+
+# Docker dev mode (auto-rebuild on changes)
+docker compose watch
+```
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Go 1.25+ |
+| Frontend | jQuery 3.7, Vue.js 3.5 |
+| Search index | DuckDB (in-memory) + Parquet (persistence) |
+| Vector search | Qdrant + Ollama embeddings |
+| Sync state | SQLite (per-user) |
+| Auth | bcrypt passwords, optional OAuth2 |
+| Container | Docker + Docker Compose |
+
+## API
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full API reference.
+
+```bash
+# Health check (no auth)
+curl http://localhost:8080/health
+
+# Search (requires session cookie)
+curl -b cookies.txt "http://localhost:8080/api/search?q=invoice&limit=20"
+
+# List accounts
+curl -b cookies.txt http://localhost:8080/api/accounts
+
+# Trigger sync
+curl -b cookies.txt -X POST http://localhost:8080/api/sync
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
