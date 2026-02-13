@@ -93,13 +93,19 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 
 		// Start live indexing goroutine: rebuild index every 5s during sync.
 		indexCtx, indexCancel := context.WithCancel(ctx)
-		go s.liveIndex(indexCtx, emailDir, indexPath, accountID)
+		var indexWg sync.WaitGroup
+		indexWg.Add(1)
+		go func() {
+			defer indexWg.Done()
+			s.liveIndex(indexCtx, emailDir, indexPath, accountID)
+		}()
 
 		s.setProgress(accountID, "syncing", "")
 		newMsgs, syncErr := s.doSync(ctx, *acct, emailDir, stateDB, accountID)
 
-		// Stop live indexing.
+		// Stop live indexing and wait for it to fully exit before final rebuild.
 		indexCancel()
+		indexWg.Wait()
 
 		now := time.Now()
 		job.FinishedAt = &now
@@ -224,9 +230,9 @@ func (s *Service) doSync(ctx context.Context, acct model.EmailAccount, emailDir 
 	case model.AccountTypeIMAP:
 		return sync_imap.SyncWithContext(ctx, acct, emailDir, stateDB, onProgress)
 	case model.AccountTypePOP3:
-		return sync_pop3.Sync(acct, emailDir, stateDB)
+		return sync_pop3.SyncWithContext(ctx, acct, emailDir, stateDB)
 	case model.AccountTypeGmailAPI:
-		return sync_gmail.Sync(acct, emailDir, stateDB)
+		return sync_gmail.SyncWithContext(ctx, acct, emailDir, stateDB)
 	default:
 		return 0, fmt.Errorf("unsupported account type: %s", acct.Type)
 	}

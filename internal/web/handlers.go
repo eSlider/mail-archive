@@ -848,6 +848,10 @@ func handleImportStatus() http.HandlerFunc {
 
 		importJobsMu.Lock()
 		job, ok := importJobsMap[jobID]
+		var snapshot importJob
+		if ok {
+			snapshot = *job
+		}
 		importJobsMu.Unlock()
 
 		if !ok {
@@ -855,6 +859,6 @@ func handleImportStatus() http.HandlerFunc {
 			return
 		}
 
-		writeJSON(w, http.StatusOK, job)
+		writeJSON(w, http.StatusOK, snapshot)
 	}
 }

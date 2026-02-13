@@ -3,6 +3,7 @@
 package gmail
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"log"
@@ -22,12 +23,17 @@ type SyncState interface {
 
 // Sync downloads new emails from a Gmail account via the Gmail API.
 // Returns (newMessages, error). NEVER deletes messages from the server.
+func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+	return SyncWithContext(context.Background(), acct, emailDir, state)
+}
+
+// SyncWithContext downloads new emails with cancellation support.
 //
 // TODO: Implement Gmail API client using golang.org/x/oauth2/google
 // and google.golang.org/api/gmail/v1. For now, this is a stub that
 // returns an error indicating it needs implementation with proper
 // OAuth2 credentials.
-func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
 	log.Printf("Gmail API: sync for %s (stub — not yet implemented)", acct.Email)
 
 	// Gmail API sync requires:
