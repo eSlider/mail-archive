@@ -87,7 +87,7 @@ func NewRouter(cfg Config) http.Handler {
 
 		// Sync API.
 		r.Post("/api/sync", handleSyncTrigger(cfg.Sync, cfg.Accounts))
-		r.Post("/api/sync/stop", handleSyncStop(cfg.Sync))
+		r.Post("/api/sync/stop", handleSyncStop(cfg.Sync, cfg.Accounts))
 		r.Get("/api/sync/status", handleSyncStatus(cfg.Sync, cfg.Accounts))
 
 		// Import API (PST/OST).

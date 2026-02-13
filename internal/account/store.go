@@ -59,7 +59,10 @@ func (s *Store) Create(userID string, acct model.EmailAccount) (*model.EmailAcco
 	if acct.Sync.Interval == "" {
 		acct.Sync.Interval = "5m"
 	}
-	acct.Sync.Enabled = true
+	// Only default to enabled for syncable account types; PST is import-only.
+	if acct.Type != model.AccountTypePST {
+		acct.Sync.Enabled = true
+	}
 
 	accounts = append(accounts, acct)
 	if err := s.save(userID, accounts); err != nil {

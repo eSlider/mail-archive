@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -317,8 +318,10 @@ func handleSyncTrigger(syncSvc *sync.Service, accounts *account.Store) http.Hand
 	}
 }
 
-func handleSyncStop(syncSvc *sync.Service) http.HandlerFunc {
+func handleSyncStop(syncSvc *sync.Service, accounts *account.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID := auth.UserIDFromContext(r.Context())
+
 		var req struct {
 			AccountID string `json:"account_id"`
 		}
@@ -326,6 +329,12 @@ func handleSyncStop(syncSvc *sync.Service) http.HandlerFunc {
 
 		if req.AccountID == "" {
 			writeError(w, http.StatusBadRequest, "account_id is required")
+			return
+		}
+
+		// Verify the account belongs to the authenticated user.
+		if _, err := accounts.Get(userID, req.AccountID); err != nil {
+			writeError(w, http.StatusForbidden, "account not found or access denied")
 			return
 		}
 
@@ -703,6 +712,7 @@ const dashboardHTML = `<!DOCTYPE html>
 // importJob tracks a running PST/OST import.
 type importJob struct {
 	ID        string `json:"id"`
+	UserID    string `json:"-"` // owner; not exposed in JSON responses
 	AccountID string `json:"account_id"`
 	Filename  string `json:"filename"`
 	Phase     string `json:"phase"`   // "uploading", "extracting", "indexing", "done", "error"
@@ -711,12 +721,12 @@ type importJob struct {
 	Error     string `json:"error,omitempty"`
 }
 
+var importJobRetention = 10 * time.Minute
+
 var (
 	importJobsMu  gosync.Mutex
 	importJobsMap = make(map[string]*importJob)
 )
-
-var importJobRetention = 2 * time.Minute
 
 func setImportJob(jobID string, job *importJob) {
 	importJobsMu.Lock()
@@ -737,9 +747,13 @@ func deleteImportJob(jobID string) {
 	delete(importJobsMap, jobID)
 }
 
+// scheduleImportJobCleanup removes a finished job from importJobsMap after
+// importJobRetention so completed/failed jobs don't accumulate forever.
 func scheduleImportJobCleanup(jobID string) {
 	time.AfterFunc(importJobRetention, func() {
-		deleteImportJob(jobID)
+		importJobsMu.Lock()
+		delete(importJobsMap, jobID)
+		importJobsMu.Unlock()
 	})
 }
 
@@ -747,34 +761,72 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromContext(r.Context())
 
-		// Allow very large uploads - no memory limit.
-		// Parse only the file part header, stream the body.
-		if err := r.ParseMultipartForm(0); err != nil {
-			// Fallback: try raw body if multipart failed.
-		}
-
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "file is required: "+err.Error())
+		// Use MultipartReader to stream the upload directly to a temp file
+		// without buffering the entire payload in memory or a temp file first.
+		mr, mrErr := r.MultipartReader()
+		if mrErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid multipart form: "+mrErr.Error())
 			return
 		}
-		defer file.Close()
 
-		title := r.FormValue("title")
-		if title == "" {
-			title = header.Filename
+		var title string
+		var filename string
+		var fileSize int64
+		var filePart io.Reader
+		for {
+			part, partErr := mr.NextPart()
+			if partErr == io.EOF {
+				break
+			}
+			if partErr != nil {
+				writeError(w, http.StatusBadRequest, "multipart read error: "+partErr.Error())
+				return
+			}
+			switch part.FormName() {
+			case "title":
+				b, _ := io.ReadAll(part)
+				title = strings.TrimSpace(string(b))
+			case "file":
+				filename = part.FileName()
+				filePart = part
+			}
+			if filePart != nil {
+				break // process file immediately — don't buffer remaining parts
+			}
 		}
+
+		if filePart == nil {
+			writeError(w, http.StatusBadRequest, "file is required")
+			return
+		}
+
+		if title == "" {
+			title = filename
+		}
+		// Sanitize title to prevent filesystem path traversal — strip
+		// directory components and collapse any ".." sequences.
+		title = filepath.Base(title)
+		title = strings.ReplaceAll(title, "..", "")
+		if title == "" || title == "." {
+			title = "imported.pst"
+		}
+
+		// Use Content-Length as an estimate for progress reporting.
+		fileSize = r.ContentLength
 
 		// Create import job ID.
 		jobID := model.NewID()
 		job := &importJob{
 			ID:       jobID,
-			Filename: header.Filename,
+			UserID:   userID,
+			Filename: filename,
 			Phase:    "uploading",
-			Total:    int(header.Size),
+			Total:    int(fileSize),
 		}
 
-		setImportJob(jobID, job)
+		importJobsMu.Lock()
+		importJobsMap[jobID] = job
+		importJobsMu.Unlock()
 
 		onUploadProgress := func(phase string, current, total int) {
 			importJobsMu.Lock()
@@ -784,14 +836,14 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 			importJobsMu.Unlock()
 		}
 
-		// Stream upload to temp file.
-		tmpPath, uploadErr := sync_pst.StreamUpload(file, header.Size, onUploadProgress)
+		// Stream upload directly to temp file (single copy, no intermediate buffer).
+		tmpPath, uploadErr := sync_pst.StreamUpload(filePart, fileSize, onUploadProgress)
 		if uploadErr != nil {
 			importJobsMu.Lock()
 			job.Phase = "error"
 			job.Error = uploadErr.Error()
 			importJobsMu.Unlock()
-			deleteImportJob(jobID)
+			scheduleImportJobCleanup(jobID)
 			writeError(w, http.StatusInternalServerError, uploadErr.Error())
 			return
 		}
@@ -806,11 +858,6 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 		created, err := cfg.Accounts.Create(userID, acct)
 		if err != nil {
 			os.Remove(tmpPath)
-			importJobsMu.Lock()
-			job.Phase = "error"
-			job.Error = err.Error()
-			importJobsMu.Unlock()
-			deleteImportJob(jobID)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -820,6 +867,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 		// Run import in background.
 		go func() {
 			defer os.Remove(tmpPath)
+			defer scheduleImportJobCleanup(jobID)
 
 			emailDir := account.EmailDir(cfg.UsersDir, userID, *created)
 			os.MkdirAll(emailDir, 0o755)
@@ -838,12 +886,11 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 				job.Phase = "error"
 				job.Error = importErr.Error()
 				importJobsMu.Unlock()
-				scheduleImportJobCleanup(jobID)
-				log.Printf("ERROR: PST import %s: %v", header.Filename, importErr)
+				log.Printf("ERROR: PST import %s: %v", filename, importErr)
 				return
 			}
 
-			log.Printf("INFO: PST import %s: %d extracted, %d errors", header.Filename, extracted, errCount)
+			log.Printf("INFO: PST import %s: %d extracted, %d errors", filename, extracted, errCount)
 
 			// Index the imported emails.
 			importJobsMu.Lock()
@@ -854,39 +901,51 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 
 			indexPath := account.IndexPath(cfg.UsersDir, userID, *created)
 			idx, idxErr := index.New(emailDir, indexPath)
-			if idxErr == nil {
-				idx.ClearCache()
-				idx.Build()
-				idx.Close()
+			if idxErr != nil {
+				importJobsMu.Lock()
+				job.Phase = "error"
+				job.Error = "indexing failed: " + idxErr.Error()
+				importJobsMu.Unlock()
+				log.Printf("ERROR: index after PST import %s: %v", filename, idxErr)
+				return
 			}
+			idx.ClearCache()
+			idx.Build()
+			idx.Close()
 
 			importJobsMu.Lock()
 			job.Phase = "done"
 			job.Current = extracted
 			job.Total = extracted
 			importJobsMu.Unlock()
-			scheduleImportJobCleanup(jobID)
 		}()
 
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"job_id":     jobID,
 			"account_id": created.ID,
-			"filename":   header.Filename,
+			"filename":   filename,
 		})
 	}
 }
 
 func handleImportStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID := auth.UserIDFromContext(r.Context())
 		jobID := chi.URLParam(r, "id")
 
-		job, ok := getImportJob(jobID)
+		importJobsMu.Lock()
+		job, ok := importJobsMap[jobID]
+		var snapshot importJob
+		if ok {
+			snapshot = *job
+		}
+		importJobsMu.Unlock()
 
-		if !ok {
+		if !ok || snapshot.UserID != userID {
 			writeError(w, http.StatusNotFound, "import job not found")
 			return
 		}
 
-		writeJSON(w, http.StatusOK, job)
+		writeJSON(w, http.StatusOK, snapshot)
 	}
 }

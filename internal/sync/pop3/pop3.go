@@ -4,6 +4,7 @@ package pop3
 
 import (
 	"bufio"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
@@ -28,6 +29,11 @@ type SyncState interface {
 // Uses SHA-256 hash deduplication since POP3 has no stable UIDs.
 // Returns (newMessages, error). NEVER deletes messages from the server.
 func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+	return SyncWithContext(context.Background(), acct, emailDir, state)
+}
+
+// SyncWithContext downloads new emails with cancellation support.
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
 	port := acct.Port
 	if port == 0 {
 		if acct.SSL {
@@ -80,6 +86,15 @@ func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error
 
 	totalNew := 0
 	for i := 1; i <= count; i++ {
+		// Check for cancellation between messages.
+		select {
+		case <-ctx.Done():
+			log.Printf("POP3: sync cancelled for %s after %d messages", acct.Email, totalNew)
+			pop3Command(conn, reader, "QUIT")
+			return totalNew, ctx.Err()
+		default:
+		}
+
 		raw, err := pop3Retr(conn, reader, i)
 		if err != nil {
 			log.Printf("WARN: POP3 RETR %d: %v", i, err)
