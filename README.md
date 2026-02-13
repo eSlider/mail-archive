@@ -1,5 +1,9 @@
 # Mail Archive
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/eSlider/mail-archive/actions/workflows/ci.yml/badge.svg)](https://github.com/eSlider/mail-archive/actions/workflows/ci.yml)
+[![Docker](https://github.com/eSlider/mail-archive/actions/workflows/docker.yml/badge.svg)](https://github.com/eSlider/mail-archive/actions/workflows/docker.yml)
+
 Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem. **Never deletes or marks emails as read.**
 
 ## Features
@@ -105,7 +109,7 @@ internal/
     vector/        → Qdrant similarity search
   web/             → Chi router, HTTP handlers
 web/
-  static/          → CSS, JS (jQuery, Vue.js — all local, no CDN)
+  static/          → CSS, JS, Vue templates (all local, no CDN, no build step)
 ```
 
 ## Development
@@ -132,13 +136,54 @@ docker compose watch
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Go 1.25+ |
-| Frontend | jQuery 3.7, Vue.js 3.5 |
+| Backend | Go 1.24+ |
+| Frontend | jQuery 3.7, Vue.js 3.5 (no build step, no CDN) |
 | Search index | DuckDB (in-memory) + Parquet (persistence) |
 | Vector search | Qdrant + Ollama embeddings |
 | Sync state | SQLite (per-user) |
 | Auth | bcrypt passwords, optional OAuth2 |
 | Container | Docker + Docker Compose |
+| License | MIT |
+
+## Frontend
+
+The frontend uses **Vue.js 3** and **jQuery** with zero build tooling -- no webpack, no Vite, no TypeScript. All vendor libraries are committed locally under `web/static/js/vendor/` (no CDN dependency).
+
+### Template Loading
+
+Vue templates are stored as standalone `.vue` files containing raw HTML with Vue directives. At startup, `main.js` fetches the template asynchronously before creating the Vue app:
+
+```javascript
+// main.js — async bootstrap
+(async function () {
+  var res = await fetch('/static/js/app/main.template.vue');
+  var template = await res.text();
+
+  var App = {
+    template: template,
+    data: function () { return { /* ... */ } },
+    methods: { /* ... */ }
+  };
+
+  Vue.createApp(App).mount('#app');
+})();
+```
+
+This keeps the template editable as a proper `.vue` file (with IDE syntax highlighting and linting) while avoiding any compile/transpile step. The pattern is inspired by the [Produktor UI](https://produktor.github.io/ui/) approach to dynamic component loading.
+
+### File Structure
+
+```
+web/static/
+  css/app.css                        # Application styles (dark theme, CSS vars)
+  js/
+    vendor/
+      jquery-3.7.1.min.js            # jQuery (local copy)
+      vue-3.5.13.global.prod.js      # Vue.js (local copy)
+    app/
+      main.js                        # App logic (data, methods, computed)
+      main.template.vue              # Vue template (HTML with directives)
+```
 
 ## API
 

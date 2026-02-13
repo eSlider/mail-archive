@@ -22,12 +22,11 @@ mails/
 │   │   └── vector/      # Qdrant similarity search
 │   └── web/             # HTTP router, handlers, middleware
 ├── web/                 # Frontend assets
-│   ├── static/
-│   │   ├── css/         # Application styles
-│   │   └── js/
-│   │       ├── vendor/  # jQuery, Vue.js (local, no CDN)
-│   │       └── app/     # Application JavaScript
-│   └── templates/       # Go HTML templates
+│   └── static/
+│       ├── css/         # Application styles
+│       └── js/
+│           ├── vendor/  # jQuery 3.7, Vue.js 3.5 (local, no CDN)
+│           └── app/     # App logic + Vue templates (.vue)
 ├── users/               # Per-user data (gitignored)
 │   └── {uuid}/
 │       ├── user.json
@@ -80,7 +79,7 @@ import (
 
 ### Language & Style
 
-- **Go 1.25+**, strict typing
+- **Go 1.24+**, strict typing
 - **No classes unless necessary** — prefer pure functions, minimal structs
 - **Minimal dependencies** — stdlib first, then well-maintained packages
 - **Comments in English only**
@@ -131,6 +130,32 @@ Use `testing.T` and table-driven tests. Mock external services (IMAP, POP3, APIs
 - **Vue.js 3.5** for reactive UI components
 - **No TypeScript** — plain JavaScript (ECMAScript)
 - **No CDN** — all resources served locally from `web/static/js/vendor/`
+- **No build step** — no webpack, Vite, or transpiler
+
+### Template Loading
+
+Vue templates are stored as standalone `.vue` files containing raw HTML with Vue directives.
+The app entry point (`main.js`) fetches the template via `fetch()` before mounting:
+
+```
+web/static/js/app/
+  main.js               # App logic: data, computed, methods, async bootstrap
+  main.template.vue     # Vue template: pure HTML with Vue directives
+```
+
+This approach gives you:
+- **IDE support** — `.vue` extension enables syntax highlighting, linting, and Emmet in editors
+- **Separation of concerns** — template markup is separate from JavaScript logic
+- **Zero tooling** — no compile/transpile step, works directly in the browser
+- **Hot-reloadable** — edit the `.vue` file and refresh the browser
+
+To add a new component, create a `component-name.template.vue` file and load it the same way:
+
+```javascript
+var res = await fetch('/static/js/app/component-name.template.vue');
+var ComponentDef = { template: await res.text(), /* data, methods... */ };
+app.component('component-name', ComponentDef);
+```
 
 ### Style Guide
 

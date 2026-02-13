@@ -183,6 +183,16 @@ a:hover { text-decoration: underline; }
   color: var(--text-dim);
 }
 
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  transition: color var(--transition);
+}
+
+.github-link:hover { color: var(--text); text-decoration: none; }
+.github-link svg { width: 20px; height: 20px; fill: currentColor; }
+
 /* --- Layout --- */
 .container {
   max-width: 1024px;
