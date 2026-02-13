@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-
 // goPstDataDir returns the path to the go-pst module's data/ folder if available.
 func goPstDataDir() (string, bool) {
 	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/mooijtech/go-pst/v6").Output()

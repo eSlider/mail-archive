@@ -46,4 +46,3 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 
 	return 0, fmt.Errorf("gmail API sync not yet implemented — use IMAP with app password instead")
 }
-
