@@ -106,7 +106,7 @@ internal/
     imap/          → IMAP protocol sync (UID-based, context-aware)
     pop3/          → POP3 protocol sync
     gmail/         → Gmail API sync
-    pst/           → PST/OST file import (go-pst)
+    pst/           → PST/OST file import (go-pst; readpst fallback for newer OST)
   search/
     eml/           → .eml parser (charset, MIME, fuzzy date parsing)
     index/         → DuckDB search index → Parquet (with cache cleanup)
@@ -214,6 +214,8 @@ curl -b cookies.txt -X POST http://localhost:8080/api/sync/stop   -H 'Content-Ty
 
 # Import PST/OST file
 curl -b cookies.txt -X POST http://localhost:8080/api/import/pst   -F "file=@archive.pst" -F "title=My Outlook Archive"
+
+# For newer Outlook OST files, install pst-utils as fallback: apt install pst-utils
 
 # Check import progress
 curl -b cookies.txt http://localhost:8080/api/import/status/{job_id}
