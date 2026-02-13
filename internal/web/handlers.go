@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	gosync "sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -715,6 +716,33 @@ var (
 	importJobsMap = make(map[string]*importJob)
 )
 
+var importJobRetention = 2 * time.Minute
+
+func setImportJob(jobID string, job *importJob) {
+	importJobsMu.Lock()
+	defer importJobsMu.Unlock()
+	importJobsMap[jobID] = job
+}
+
+func getImportJob(jobID string) (*importJob, bool) {
+	importJobsMu.Lock()
+	defer importJobsMu.Unlock()
+	job, ok := importJobsMap[jobID]
+	return job, ok
+}
+
+func deleteImportJob(jobID string) {
+	importJobsMu.Lock()
+	defer importJobsMu.Unlock()
+	delete(importJobsMap, jobID)
+}
+
+func scheduleImportJobCleanup(jobID string) {
+	time.AfterFunc(importJobRetention, func() {
+		deleteImportJob(jobID)
+	})
+}
+
 func handleImportPST(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromContext(r.Context())
@@ -746,9 +774,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 			Total:    int(header.Size),
 		}
 
-		importJobsMu.Lock()
-		importJobsMap[jobID] = job
-		importJobsMu.Unlock()
+		setImportJob(jobID, job)
 
 		onUploadProgress := func(phase string, current, total int) {
 			importJobsMu.Lock()
@@ -765,6 +791,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 			job.Phase = "error"
 			job.Error = uploadErr.Error()
 			importJobsMu.Unlock()
+			deleteImportJob(jobID)
 			writeError(w, http.StatusInternalServerError, uploadErr.Error())
 			return
 		}
@@ -779,6 +806,11 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 		created, err := cfg.Accounts.Create(userID, acct)
 		if err != nil {
 			os.Remove(tmpPath)
+			importJobsMu.Lock()
+			job.Phase = "error"
+			job.Error = err.Error()
+			importJobsMu.Unlock()
+			deleteImportJob(jobID)
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -806,6 +838,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 				job.Phase = "error"
 				job.Error = importErr.Error()
 				importJobsMu.Unlock()
+				scheduleImportJobCleanup(jobID)
 				log.Printf("ERROR: PST import %s: %v", header.Filename, importErr)
 				return
 			}
@@ -832,6 +865,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 			job.Current = extracted
 			job.Total = extracted
 			importJobsMu.Unlock()
+			scheduleImportJobCleanup(jobID)
 		}()
 
 		writeJSON(w, http.StatusAccepted, map[string]any{
@@ -846,9 +880,7 @@ func handleImportStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobID := chi.URLParam(r, "id")
 
-		importJobsMu.Lock()
-		job, ok := importJobsMap[jobID]
-		importJobsMu.Unlock()
+		job, ok := getImportJob(jobID)
 
 		if !ok {
 			writeError(w, http.StatusNotFound, "import job not found")
