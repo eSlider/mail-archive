@@ -586,6 +586,18 @@ func (c *imapClient) fetchBatch(uids []int) (map[int][]byte, error) {
 			return result, fmt.Errorf("fetchBatch literal UID %d: %w", msgUID, err)
 		}
 
+		// Read the trailing line after the literal (e.g. " UID 123)" or ")").
+		// If UID wasn't in the pre-literal line, look for it here.
+		trailing, trailErr := c.readLine()
+		if trailErr != nil {
+			return result, fmt.Errorf("fetchBatch trailing: %w", trailErr)
+		}
+		if msgUID == 0 {
+			if idx := strings.Index(strings.ToUpper(trailing), "UID "); idx >= 0 {
+				fmt.Sscanf(trailing[idx+4:], "%d", &msgUID)
+			}
+		}
+
 		if msgUID > 0 {
 			result[msgUID] = rawData
 		}

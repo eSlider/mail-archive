@@ -316,8 +316,10 @@ func handleSyncTrigger(syncSvc *sync.Service, accounts *account.Store) http.Hand
 	}
 }
 
-func handleSyncStop(syncSvc *sync.Service) http.HandlerFunc {
+func handleSyncStop(syncSvc *sync.Service, accounts *account.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID := auth.UserIDFromContext(r.Context())
+
 		var req struct {
 			AccountID string `json:"account_id"`
 		}
@@ -325,6 +327,12 @@ func handleSyncStop(syncSvc *sync.Service) http.HandlerFunc {
 
 		if req.AccountID == "" {
 			writeError(w, http.StatusBadRequest, "account_id is required")
+			return
+		}
+
+		// Verify the account belongs to the authenticated user.
+		if _, err := accounts.Get(userID, req.AccountID); err != nil {
+			writeError(w, http.StatusForbidden, "account not found or access denied")
 			return
 		}
 
@@ -702,6 +710,7 @@ const dashboardHTML = `<!DOCTYPE html>
 // importJob tracks a running PST/OST import.
 type importJob struct {
 	ID        string `json:"id"`
+	UserID    string `json:"-"` // owner; not exposed in JSON responses
 	AccountID string `json:"account_id"`
 	Filename  string `json:"filename"`
 	Phase     string `json:"phase"`   // "uploading", "extracting", "indexing", "done", "error"
@@ -736,11 +745,19 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 		if title == "" {
 			title = header.Filename
 		}
+		// Sanitize title to prevent filesystem path traversal — strip
+		// directory components and collapse any ".." sequences.
+		title = filepath.Base(title)
+		title = strings.ReplaceAll(title, "..", "")
+		if title == "" || title == "." {
+			title = "imported.pst"
+		}
 
 		// Create import job ID.
 		jobID := model.NewID()
 		job := &importJob{
 			ID:       jobID,
+			UserID:   userID,
 			Filename: header.Filename,
 			Phase:    "uploading",
 			Total:    int(header.Size),
@@ -844,6 +861,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 
 func handleImportStatus() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		userID := auth.UserIDFromContext(r.Context())
 		jobID := chi.URLParam(r, "id")
 
 		importJobsMu.Lock()
@@ -854,7 +872,7 @@ func handleImportStatus() http.HandlerFunc {
 		}
 		importJobsMu.Unlock()
 
-		if !ok {
+		if !ok || snapshot.UserID != userID {
 			writeError(w, http.StatusNotFound, "import job not found")
 			return
 		}
