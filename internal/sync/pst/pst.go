@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,12 +34,35 @@ func init() {
 type ProgressFunc func(phase string, current, total int)
 
 // Import extracts all messages from a PST/OST file and saves them as .eml files.
+// Uses go-pst first; if it panics or fails, falls back to readpst (from pst-utils)
+// when available for broader OST compatibility.
 // Returns (extracted count, error count).
 func Import(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error) {
 	if onProgress == nil {
 		onProgress = func(string, int, int) {}
 	}
 
+	var extracted, errCount int
+	var importErr error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				importErr = fmt.Errorf("go-pst panic: %v", r)
+			}
+		}()
+		extracted, errCount, importErr = importGoPst(pstPath, emailDir, onProgress)
+	}()
+
+	if importErr == nil {
+		return extracted, errCount, nil
+	}
+
+	// Fallback to readpst when go-pst fails (e.g. newer OST formats, btree bugs).
+	log.Printf("INFO: go-pst failed (%v), trying readpst fallback", importErr)
+	return importReadpst(pstPath, emailDir, onProgress)
+}
+
+func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error) {
 	f, err := os.Open(pstPath)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open PST: %w", err)
@@ -171,6 +195,37 @@ func escapeHeader(s string) string {
 func contentChecksum(data []byte) string {
 	h := sha256.Sum256(data)
 	return fmt.Sprintf("%x", h[:8])
+}
+
+// importReadpst uses the readpst command (pst-utils) when go-pst fails.
+// Requires: apt install pst-utils (Debian/Ubuntu) or equivalent.
+func importReadpst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error) {
+	if _, err := exec.LookPath("readpst"); err != nil {
+		return 0, 0, fmt.Errorf("readpst not installed (install pst-utils), go-pst failed earlier")
+	}
+
+	onProgress("extracting", 0, 0)
+
+	cmd := exec.Command("readpst", "-e", "-o", emailDir, "-j", "0", pstPath)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		return 0, 0, fmt.Errorf("readpst: %w", err)
+	}
+
+	var count int
+	filepath.Walk(emailDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.ToLower(filepath.Ext(path)) == ".eml" {
+			count++
+		}
+		return nil
+	})
+
+	onProgress("done", count, count)
+	return count, 0, nil
 }
 
 func sanitizeFolderName(name string) string {

@@ -20,7 +20,7 @@ RUN CGO_ENABLED=1 go build -o /mails ./cmd/mails
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tini && rm -rf /var/lib/apt/lists/*
+    ca-certificates tini pst-utils && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /mails /usr/local/bin/mails
 COPY --from=builder /build/web/static /app/web/static
