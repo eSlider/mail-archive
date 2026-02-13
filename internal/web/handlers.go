@@ -373,6 +373,7 @@ func handleSearch(cfg Config) http.HandlerFunc {
 		userID := auth.UserIDFromContext(r.Context())
 		q := r.URL.Query().Get("q")
 		accountFilter := r.URL.Query().Get("account_id")
+		accountIDsFilter := r.URL.Query().Get("account_ids")
 		limit := queryInt(r, "limit", 50)
 		offset := queryInt(r, "offset", 0)
 
@@ -420,9 +421,21 @@ func handleSearch(cfg Config) http.HandlerFunc {
 				return
 			}
 		} else {
-			// All accounts: search every index.parquet.
+			// Filter by account_ids (comma-separated) if provided.
+			var allowedIDs map[string]bool
+			if accountIDsFilter != "" {
+				allowedIDs = make(map[string]bool)
+				for _, id := range strings.Split(accountIDsFilter, ",") {
+					if id = strings.TrimSpace(id); id != "" {
+						allowedIDs[id] = true
+					}
+				}
+			}
 			accountIndices := make([]index.AccountIndex, 0, len(accts))
 			for _, a := range accts {
+				if allowedIDs != nil && !allowedIDs[a.ID] {
+					continue
+				}
 				accountIndices = append(accountIndices, index.AccountIndex{
 					ID:        a.ID,
 					IndexPath: account.IndexPath(cfg.UsersDir, userID, a),

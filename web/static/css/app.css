@@ -329,6 +329,34 @@ a:hover { text-decoration: underline; }
 .search-meta {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.search-account-mask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+}
+
+.search-account-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.search-account-check input {
+  margin: 0;
+}
+
+.sync-status-inline {
+  color: var(--text-dim);
+  font-size: 0.82rem;
   align-items: center;
   margin-bottom: 0.6rem;
   font-size: 0.82rem;

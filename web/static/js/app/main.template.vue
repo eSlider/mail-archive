@@ -5,7 +5,6 @@
     <nav class="header-nav">
       <a href="#" :class="{active: view === 'search'}" @click.prevent="navigate('#')">Search</a>
       <a href="#/accounts" :class="{active: view === 'accounts'}" @click.prevent="navigate('#/accounts')">Accounts</a>
-      <a href="#/sync" :class="{active: view === 'sync'}" @click.prevent="navigate('#/sync')">Sync</a>
       <a href="#/import" :class="{active: view === 'import'}" @click.prevent="navigate('#/import')">Import</a>
     </nav>
     <div class="header-right" v-if="user">
@@ -29,10 +28,13 @@
         {{ searchResults.total || 0 }} result{{ searchResults.total !== 1 ? "s" : "" }}
       </span>
       <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center">
-        <select v-model="searchAccountFilter" @change="onSearchAccountFilterChange" class="form-control form-control-sm" style="max-width:220px">
-          <option value="">All accounts</option>
-          <option v-for="acct in accounts" :key="acct.id" :value="acct.id">{{ acct.email }}</option>
-        </select>
+        <div v-if="accounts.length" class="search-account-mask" title="Toggle accounts included in search">
+          <span style="font-size:0.8rem;color:var(--text-dim);margin-right:0.25rem">Accounts:</span>
+          <label v-for="acct in accounts" :key="acct.id" class="search-account-check">
+            <input type="checkbox" :checked="isSearchAccountEnabled(acct.id)" @change="toggleSearchAccount(acct.id)">
+            <span>{{ acct.email }}</span>
+          </label>
+        </div>
         <button class="btn btn-sm" :class="{'btn-primary': searchMode === 'keyword'}" @click="setSearchMode('keyword')">Keyword</button>
         <button class="btn btn-sm" :class="{'btn-primary': searchMode === 'similarity'}" @click="setSearchMode('similarity')">Similarity</button>
       </div>
@@ -61,11 +63,12 @@
     </div>
   </div>
 
-  <!-- Accounts View -->
+  <!-- Accounts View (merged with Sync) -->
   <div v-if="view === 'accounts'" class="container">
     <div class="page-title">
-      <span>Email Accounts</span>
-      <button class="btn btn-primary btn-sm" @click="openAddAccount">+ Add Account</button>
+      <span>Email Accounts &amp; Sync</span>
+      <button class="btn btn-primary btn-sm" @click="triggerSync(null)">Sync All</button>
+      <button class="btn btn-sm" @click="openAddAccount">+ Add Account</button>
     </div>
     <div class="card">
       <div v-if="accounts.length === 0" class="card-body">
@@ -87,6 +90,9 @@
             <span v-else>
               <span v-if="acct.host">{{ acct.host }}:{{ acct.port }}</span>
               <span>Every {{ acct.sync.interval }}</span>
+              <span v-if="accountSyncStatus(acct.id).last_sync" class="sync-status-inline" :class="{done: !accountSyncStatus(acct.id).syncing}">
+                · {{ accountSyncStatus(acct.id).syncing ? 'Syncing...' : (accountSyncStatus(acct.id).new_messages ? '+' + accountSyncStatus(acct.id).new_messages + ' new' : 'Up to date') }}
+              </span>
             </span>
           </div>
           <div v-if="acct.type !== 'PST' && accountSyncStatus(acct.id).progress && accountSyncStatus(acct.id).syncing" class="account-progress">{{ accountSyncStatus(acct.id).progress }}</div>
@@ -103,39 +109,6 @@
           <button class="btn btn-sm" @click="openEditAccount(acct)">Edit</button>
           <button class="btn btn-sm btn-danger" @click="deleteAccount(acct)">Delete</button>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Sync View -->
-  <div v-if="view === 'sync'" class="container">
-    <div class="page-title">
-      <span>Sync Status</span>
-      <button class="btn btn-primary btn-sm" @click="triggerSync(null)">Sync All</button>
-    </div>
-    <div class="card">
-      <div v-if="syncStatuses.length === 0" class="card-body">
-        <div class="empty-state"><p>No sync data available.</p></div>
-      </div>
-      <div v-for="s in syncStatuses" :key="s.id" class="account-item">
-        <div class="account-icon">{{ accountIcon(s.type) }}</div>
-        <div class="account-info">
-          <div class="account-email">{{ s.name }}</div>
-          <div class="account-meta">
-            <span :class="'badge badge-' + s.type.toLowerCase()">{{ s.type }}</span>
-          </div>
-          <div v-if="s.progress && s.syncing" class="account-progress">{{ s.progress }}</div>
-          <div v-if="s.last_error" class="account-error">{{ s.last_error }}</div>
-        </div>
-        <div class="sync-status" :class="{running: s.syncing, done: !s.syncing && s.last_sync, error: s.last_error && !s.syncing}">
-          <span v-if="s.syncing" class="spinner"></span>
-          <span v-if="s.syncing">Syncing...</span>
-          <span v-else-if="s.last_error">Error</span>
-          <span v-else-if="s.last_sync">{{ s.new_messages ? "+" + s.new_messages + " new" : "Up to date" }}</span>
-          <span v-else>Never synced</span>
-        </div>
-        <button v-if="s.syncing" class="btn btn-sm btn-danger" @click="stopSync(s.id)">Stop</button>
-        <button v-else class="btn btn-sm" @click="triggerSync(s.id)">Sync</button>
       </div>
     </div>
   </div>

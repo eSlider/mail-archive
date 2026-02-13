@@ -20,7 +20,7 @@
         searchQuery: '',
         searchResults: null,
         searchMode: 'keyword',
-        searchAccountFilter: '',
+        searchAccountMask: {},
         currentPage: 0,
         pageSize: 50,
         selectedEmail: null,
@@ -126,8 +126,6 @@
           this.showEmailDetail(emailPath, accountId)
         } else if (hash === '#/accounts') {
           this.view = 'accounts'
-        } else if (hash === '#/sync') {
-          this.view = 'sync'
           this.loadSyncStatus()
         } else if (hash === '#/import') {
           this.view = 'import'
@@ -260,7 +258,10 @@
         var self = this
         var url = '/api/search?limit=' + this.pageSize + '&offset=' + (offset || 0)
         url += '&q=' + encodeURIComponent(query || '')
-        if (this.searchAccountFilter) url += '&account_id=' + encodeURIComponent(this.searchAccountFilter)
+        var ids = this.enabledSearchAccountIds()
+        if (ids.length > 0 && ids.length < this.accounts.length) {
+          url += '&account_ids=' + encodeURIComponent(ids.join(','))
+        }
         if (this.searchMode === 'similarity') url += '&mode=similarity'
 
         $.getJSON(url).done(function (data) {
@@ -283,9 +284,19 @@
         this.doSearch(this.searchQuery, 0)
       },
 
-      onSearchAccountFilterChange: function () {
+      isSearchAccountEnabled: function (acctId) {
+        return this.searchAccountMask[acctId] !== false
+      },
+
+      toggleSearchAccount: function (acctId) {
+        this.searchAccountMask = Object.assign({}, this.searchAccountMask, { [acctId]: !this.isSearchAccountEnabled(acctId) })
         this.currentPage = 0
         this.doSearch(this.searchQuery, 0)
+      },
+
+      enabledSearchAccountIds: function () {
+        var self = this
+        return this.accounts.filter(function (a) { return self.isSearchAccountEnabled(a.id) }).map(function (a) { return a.id })
       },
 
       emailDetailHref: function (hit) {
