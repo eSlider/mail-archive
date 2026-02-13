@@ -121,10 +121,10 @@ func TestIndex_KeywordSearch(t *testing.T) {
 	idx.Build()
 
 	tests := []struct {
-		query     string
-		wantMin   int
-		wantMax   int
-		desc      string
+		query   string
+		wantMin int
+		wantMax int
+		desc    string
 	}{
 		{"kubernetes", 1, 1, "matches subject of ops alert"},
 		{"financial", 1, 1, "matches body of finance email"},

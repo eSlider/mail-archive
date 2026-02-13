@@ -26,8 +26,8 @@ type Embedder interface {
 // OllamaEmbedder calls Ollama's /api/embed endpoint.
 type OllamaEmbedder struct {
 	baseURL string
-	model  string
-	client *http.Client
+	model   string
+	client  *http.Client
 }
 
 // NewOllamaEmbedder creates an embedder for the given Ollama server.

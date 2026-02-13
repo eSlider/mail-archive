@@ -443,8 +443,8 @@ func handleSearchStats(cfg Config) http.HandlerFunc {
 		accts, _ := cfg.Accounts.List(userID)
 
 		out := map[string]any{
-			"total_emails":        0,
-			"accounts":            len(accts),
+			"total_emails":         0,
+			"accounts":             len(accts),
 			"similarity_available": cfg.QdrantURL != "" && cfg.OllamaURL != "",
 		}
 		writeJSON(w, http.StatusOK, out)

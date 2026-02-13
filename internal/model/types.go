@@ -23,7 +23,7 @@ type User struct {
 	Name         string    `json:"name" yaml:"name"`
 	Email        string    `json:"email" yaml:"email"`
 	AvatarURL    string    `json:"avatar_url,omitempty" yaml:"avatar_url,omitempty"`
-	PasswordHash string    `json:"-" yaml:"password_hash,omitempty"` // bcrypt hash, never exposed
+	PasswordHash string    `json:"-" yaml:"password_hash,omitempty"`             // bcrypt hash, never exposed
 	Provider     string    `json:"provider,omitempty" yaml:"provider,omitempty"` // "local", "github", "google", "facebook"
 	ProviderID   string    `json:"provider_id,omitempty" yaml:"provider_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at" yaml:"created_at"`
@@ -79,10 +79,10 @@ type SyncJob struct {
 type SyncStatus string
 
 const (
-	SyncStatusPending  SyncStatus = "pending"
-	SyncStatusRunning  SyncStatus = "running"
-	SyncStatusDone     SyncStatus = "done"
-	SyncStatusFailed   SyncStatus = "failed"
+	SyncStatusPending SyncStatus = "pending"
+	SyncStatusRunning SyncStatus = "running"
+	SyncStatusDone    SyncStatus = "done"
+	SyncStatusFailed  SyncStatus = "failed"
 )
 
 // Session holds an authenticated user session.

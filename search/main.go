@@ -304,10 +304,10 @@ func handleStats(idx *index.Index, vecStore *vector.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s := idx.Stats()
 		out := map[string]any{
-			"total_emails":        s.TotalEmails,
-			"indexed_at":          s.IndexedAt,
-			"email_dir":           s.EmailDir,
-			"index_path":          s.IndexPath,
+			"total_emails":         s.TotalEmails,
+			"indexed_at":           s.IndexedAt,
+			"email_dir":            s.EmailDir,
+			"index_path":           s.IndexPath,
 			"similarity_available": vecStore != nil,
 		}
 		writeJSON(w, http.StatusOK, out)

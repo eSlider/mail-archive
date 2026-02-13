@@ -157,7 +157,7 @@ func (s *Store) EnsureCollection(ctx context.Context) error {
 	}
 	return s.client.CreateCollection(ctx, &qdrant.CreateCollection{
 		CollectionName: collectionName,
-		VectorsConfig:  qdrant.NewVectorsConfig(&qdrant.VectorParams{
+		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size:     uint64(s.vectorSize),
 			Distance: vectorDistance,
 		}),
@@ -173,7 +173,7 @@ func (s *Store) RecreateCollection(ctx context.Context) error {
 	}
 	return s.client.CreateCollection(ctx, &qdrant.CreateCollection{
 		CollectionName: collectionName,
-		VectorsConfig:  qdrant.NewVectorsConfig(&qdrant.VectorParams{
+		VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 			Size:     uint64(s.vectorSize),
 			Distance: vectorDistance,
 		}),
@@ -224,14 +224,14 @@ func (s *Store) IndexEmails(ctx context.Context, emailDir string, walkFn WalkEma
 		points := make([]*qdrant.PointStruct, len(chunk))
 		for j, e := range chunk {
 			points[j] = &qdrant.PointStruct{
-				Id: qdrant.NewIDNum(pathToID(e.Path)),
+				Id:      qdrant.NewIDNum(pathToID(e.Path)),
 				Vectors: newVector(vecs[j]),
 				Payload: qdrant.NewValueMap(map[string]any{
-					"path":   e.Path,
+					"path":    e.Path,
 					"subject": e.Subject,
-					"from":   e.From,
-					"to":    e.To,
-					"date":  e.Date.Unix(),
+					"from":    e.From,
+					"to":      e.To,
+					"date":    e.Date.Unix(),
 				}),
 			}
 		}

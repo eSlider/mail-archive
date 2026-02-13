@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	cookieName     = "mails_session"
-	sessionMaxAge  = 30 * 24 * time.Hour // 30 days
-	sessionsFile   = "sessions.json"
+	cookieName    = "mails_session"
+	sessionMaxAge = 30 * 24 * time.Hour // 30 days
+	sessionsFile  = "sessions.json"
 )
 
 // SessionStore manages user sessions backed by a JSON file.

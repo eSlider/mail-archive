@@ -15,10 +15,10 @@ import (
 
 // Service orchestrates email sync for all accounts of a user.
 type Service struct {
-	mu        sync.Mutex
-	usersDir  string
-	accounts  *account.Store
-	running   map[string]bool // accountID -> syncing
+	mu       sync.Mutex
+	usersDir string
+	accounts *account.Store
+	running  map[string]bool // accountID -> syncing
 }
 
 // NewService creates a sync service.
