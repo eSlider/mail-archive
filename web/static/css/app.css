@@ -666,3 +666,118 @@ select.form-control {
   .form-row { grid-template-columns: 1fr; }
   .header-nav { display: none; }
 }
+
+/* --- Sync progress & error indicators --- */
+.account-item.syncing {
+  background: rgba(59, 130, 246, 0.04);
+  border-left: 3px solid var(--accent);
+}
+
+.badge-syncing {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent-light);
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+}
+
+.badge-error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 10px;
+  margin-left: 0.5rem;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.spinner-sm {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(96, 165, 250, 0.3);
+  border-top-color: var(--accent-light);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+
+.account-progress {
+  font-size: 0.75rem;
+  color: var(--accent-light);
+  margin-top: 0.25rem;
+  opacity: 0.85;
+}
+
+.account-error {
+  font-size: 0.75rem;
+  color: #f87171;
+  margin-top: 0.25rem;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toast.warning {
+  background: #92400e;
+  color: #fef3c7;
+}
+
+/* --- Import progress --- */
+.import-progress {
+  border-top: 1px solid var(--border);
+  padding: 1.25rem 1.5rem;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.progress-phase {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.progress-phase.uploading { color: var(--accent-light); }
+.progress-phase.extracting { color: #f59e0b; }
+.progress-phase.indexing { color: #8b5cf6; }
+.progress-phase.done { color: #10b981; }
+.progress-phase.error { color: #ef4444; }
+
+.progress-detail {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.progress-bar-wrapper {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.badge-done { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+.badge-extracting { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+.badge-indexing { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
+.badge-uploading { background: rgba(59, 130, 246, 0.12); color: var(--accent-light); }
+
+.card-body {
+  padding: 1.25rem 1.5rem;
+}

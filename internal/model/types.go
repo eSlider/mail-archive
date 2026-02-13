@@ -37,6 +37,7 @@ const (
 	AccountTypeIMAP     AccountType = "IMAP"
 	AccountTypePOP3     AccountType = "POP3"
 	AccountTypeGmailAPI AccountType = "GMAIL_API"
+	AccountTypePST      AccountType = "PST"
 )
 
 // EmailAccount represents a single email account configuration.
@@ -89,7 +90,7 @@ const (
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
-	Token     string    `json:"-"`
+	Token     string    `json:"token"`
 	CreatedAt time.Time `json:"created_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 }

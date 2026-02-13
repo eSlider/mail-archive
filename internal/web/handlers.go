@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
+	gosync "sync"
 
 	"github.com/go-chi/chi/v5"
 
@@ -18,6 +20,7 @@ import (
 	"github.com/eslider/mails/internal/search/eml"
 	"github.com/eslider/mails/internal/search/index"
 	"github.com/eslider/mails/internal/sync"
+	sync_pst "github.com/eslider/mails/internal/sync/pst"
 	"github.com/eslider/mails/internal/user"
 )
 
@@ -313,6 +316,26 @@ func handleSyncTrigger(syncSvc *sync.Service, accounts *account.Store) http.Hand
 	}
 }
 
+func handleSyncStop(syncSvc *sync.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			AccountID string `json:"account_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.AccountID == "" {
+			writeError(w, http.StatusBadRequest, "account_id is required")
+			return
+		}
+
+		if err := syncSvc.StopSync(req.AccountID); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+	}
+}
+
 func handleSyncStatus(syncSvc *sync.Service, accounts *account.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromContext(r.Context())
@@ -453,7 +476,29 @@ func handleSearchStats(cfg Config) http.HandlerFunc {
 
 func handleReindex(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// TODO: implement background reindex per user/account.
+		userID := auth.UserIDFromContext(r.Context())
+		accts, err := cfg.Accounts.List(userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		go func() {
+			for _, acct := range accts {
+				emailDir := account.EmailDir(cfg.UsersDir, userID, acct)
+				indexPath := account.IndexPath(cfg.UsersDir, userID, acct)
+				idx, err := index.New(emailDir, indexPath)
+				if err != nil {
+					log.Printf("WARN: reindex %s: %v", acct.Email, err)
+					continue
+				}
+				idx.ClearCache()
+				idx.Build()
+				idx.Close()
+				log.Printf("INFO: reindexed %s", acct.Email)
+			}
+		}()
+
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 	}
 }
@@ -651,3 +696,165 @@ const dashboardHTML = `<!DOCTYPE html>
 <script src="/static/js/app/main.js"></script>
 </body>
 </html>`
+
+// --- PST/OST Import ---
+
+// importJob tracks a running PST/OST import.
+type importJob struct {
+	ID        string `json:"id"`
+	AccountID string `json:"account_id"`
+	Filename  string `json:"filename"`
+	Phase     string `json:"phase"`   // "uploading", "extracting", "indexing", "done", "error"
+	Current   int    `json:"current"` // bytes uploaded or messages extracted
+	Total     int    `json:"total"`   // total bytes or total messages
+	Error     string `json:"error,omitempty"`
+}
+
+var (
+	importJobsMu  gosync.Mutex
+	importJobsMap = make(map[string]*importJob)
+)
+
+func handleImportPST(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := auth.UserIDFromContext(r.Context())
+
+		// Allow very large uploads - no memory limit.
+		// Parse only the file part header, stream the body.
+		if err := r.ParseMultipartForm(0); err != nil {
+			// Fallback: try raw body if multipart failed.
+		}
+
+		file, header, err := r.FormFile("file")
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "file is required: "+err.Error())
+			return
+		}
+		defer file.Close()
+
+		title := r.FormValue("title")
+		if title == "" {
+			title = header.Filename
+		}
+
+		// Create import job ID.
+		jobID := model.NewID()
+		job := &importJob{
+			ID:       jobID,
+			Filename: header.Filename,
+			Phase:    "uploading",
+			Total:    int(header.Size),
+		}
+
+		importJobsMu.Lock()
+		importJobsMap[jobID] = job
+		importJobsMu.Unlock()
+
+		onUploadProgress := func(phase string, current, total int) {
+			importJobsMu.Lock()
+			job.Phase = phase
+			job.Current = current
+			job.Total = total
+			importJobsMu.Unlock()
+		}
+
+		// Stream upload to temp file.
+		tmpPath, uploadErr := sync_pst.StreamUpload(file, header.Size, onUploadProgress)
+		if uploadErr != nil {
+			importJobsMu.Lock()
+			job.Phase = "error"
+			job.Error = uploadErr.Error()
+			importJobsMu.Unlock()
+			writeError(w, http.StatusInternalServerError, uploadErr.Error())
+			return
+		}
+
+		// Create PST account.
+		acct := model.EmailAccount{
+			Type:    model.AccountTypePST,
+			Email:   title,
+			Folders: "all",
+			Sync:    model.SyncConfig{Interval: "0", Enabled: false},
+		}
+		created, err := cfg.Accounts.Create(userID, acct)
+		if err != nil {
+			os.Remove(tmpPath)
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		job.AccountID = created.ID
+
+		// Run import in background.
+		go func() {
+			defer os.Remove(tmpPath)
+
+			emailDir := account.EmailDir(cfg.UsersDir, userID, *created)
+			os.MkdirAll(emailDir, 0o755)
+
+			onExtractProgress := func(phase string, current, total int) {
+				importJobsMu.Lock()
+				job.Phase = phase
+				job.Current = current
+				job.Total = total
+				importJobsMu.Unlock()
+			}
+
+			extracted, errCount, importErr := sync_pst.Import(tmpPath, emailDir, onExtractProgress)
+			if importErr != nil {
+				importJobsMu.Lock()
+				job.Phase = "error"
+				job.Error = importErr.Error()
+				importJobsMu.Unlock()
+				log.Printf("ERROR: PST import %s: %v", header.Filename, importErr)
+				return
+			}
+
+			log.Printf("INFO: PST import %s: %d extracted, %d errors", header.Filename, extracted, errCount)
+
+			// Index the imported emails.
+			importJobsMu.Lock()
+			job.Phase = "indexing"
+			job.Current = 0
+			job.Total = extracted
+			importJobsMu.Unlock()
+
+			indexPath := account.IndexPath(cfg.UsersDir, userID, *created)
+			idx, idxErr := index.New(emailDir, indexPath)
+			if idxErr == nil {
+				idx.ClearCache()
+				idx.Build()
+				idx.Close()
+			}
+
+			importJobsMu.Lock()
+			job.Phase = "done"
+			job.Current = extracted
+			job.Total = extracted
+			importJobsMu.Unlock()
+		}()
+
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"job_id":     jobID,
+			"account_id": created.ID,
+			"filename":   header.Filename,
+		})
+	}
+}
+
+func handleImportStatus() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jobID := chi.URLParam(r, "id")
+
+		importJobsMu.Lock()
+		job, ok := importJobsMap[jobID]
+		importJobsMu.Unlock()
+
+		if !ok {
+			writeError(w, http.StatusNotFound, "import job not found")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, job)
+	}
+}

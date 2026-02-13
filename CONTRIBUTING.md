@@ -12,10 +12,11 @@ mails/
 │   ├── user/            # User management, UUIDv7 IDs
 │   ├── account/         # Per-user email account CRUD
 │   ├── model/           # Shared data types
-│   ├── sync/            # Email sync orchestration
-│   │   ├── imap/        # IMAP protocol sync
+│   ├── sync/            # Email sync orchestration, live indexing
+│   │   ├── imap/        # IMAP protocol sync (UID-based, cancellable)
 │   │   ├── pop3/        # POP3 protocol sync
-│   │   └── gmail/       # Gmail API sync
+│   │   ├── gmail/       # Gmail API sync
+│   │   └── pst/         # PST/OST file import (go-pst library)
 │   ├── search/          # Email search & indexing
 │   │   ├── eml/         # .eml file parser
 │   │   ├── index/       # DuckDB + Parquet index
@@ -211,8 +212,9 @@ users/{uuid}/gmail.com/eslider/inbox/a1b2c3d4e5f67890-12345.eml
 ```
 
 - Filename: `{sha256-prefix-16}-{uid}.eml`
-- File mtime: set to email's Date header
+- File mtime: set from email Date header (fallback: fuzzy Date parsing → Received header)
 - Deduplication: by content checksum (IMAP/POP3) or message ID (Gmail)
+- Use `./mails fix-dates` to batch-repair mtime on all existing .eml files
 
 ## Docker
 
@@ -260,7 +262,15 @@ All API endpoints require authentication (session cookie or `Authorization: Bear
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/sync` | Trigger sync (all or specific account) |
-| GET | `/api/sync/status` | Sync status per account |
+| POST | `/api/sync/stop` | Cancel a running sync (requires `account_id`) |
+| GET | `/api/sync/status` | Sync status per account (progress, errors) |
+
+### Import
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/import/pst` | Upload and import PST/OST file (multipart) |
+| GET | `/api/import/status/{id}` | Import job progress (phase, count) |
 
 ### Search
 

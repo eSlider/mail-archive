@@ -6,6 +6,7 @@
       <a href="#" :class="{active: view === 'search'}" @click.prevent="navigate('#')">Search</a>
       <a href="#/accounts" :class="{active: view === 'accounts'}" @click.prevent="navigate('#/accounts')">Accounts</a>
       <a href="#/sync" :class="{active: view === 'sync'}" @click.prevent="navigate('#/sync')">Sync</a>
+      <a href="#/import" :class="{active: view === 'import'}" @click.prevent="navigate('#/import')">Import</a>
     </nav>
     <div class="header-right" v-if="user">
       <a href="https://github.com/eSlider/mail-archive" target="_blank" rel="noopener" class="github-link" title="View on GitHub">
@@ -66,18 +67,27 @@
       <div v-if="accounts.length === 0" class="card-body">
         <div class="empty-state"><p>No email accounts configured yet.</p></div>
       </div>
-      <div v-for="acct in accounts" :key="acct.id" class="account-item">
+      <div v-for="acct in accounts" :key="acct.id" class="account-item" :class="{syncing: accountSyncStatus(acct.id).syncing}">
         <div class="account-icon">{{ accountIcon(acct.type) }}</div>
         <div class="account-info">
-          <div class="account-email">{{ acct.email }}</div>
+          <div class="account-email">
+            {{ acct.email }}
+            <span v-if="accountSyncStatus(acct.id).syncing" class="badge badge-syncing">
+              <span class="spinner spinner-sm"></span> syncing
+            </span>
+            <span v-if="accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="badge badge-error">error</span>
+          </div>
           <div class="account-meta">
             <span :class="accountTypeBadge(acct.type)">{{ acct.type }}</span>
             <span v-if="acct.host">{{ acct.host }}:{{ acct.port }}</span>
             <span>Every {{ acct.sync.interval }}</span>
           </div>
+          <div v-if="accountSyncStatus(acct.id).progress && accountSyncStatus(acct.id).syncing" class="account-progress">{{ accountSyncStatus(acct.id).progress }}</div>
+          <div v-if="accountSyncStatus(acct.id).last_error && !accountSyncStatus(acct.id).syncing" class="account-error">{{ accountSyncStatus(acct.id).last_error }}</div>
         </div>
         <div class="account-actions">
-          <button class="btn btn-sm" @click="triggerSync(acct.id)">Sync</button>
+          <button v-if="accountSyncStatus(acct.id).syncing" class="btn btn-sm btn-danger" @click="stopSync(acct.id)">Stop</button>
+          <button v-else class="btn btn-sm" @click="triggerSync(acct.id)">Sync</button>
           <button class="btn btn-sm" @click="openEditAccount(acct)">Edit</button>
           <button class="btn btn-sm btn-danger" @click="deleteAccount(acct)">Delete</button>
         </div>
@@ -102,15 +112,70 @@
           <div class="account-meta">
             <span :class="'badge badge-' + s.type.toLowerCase()">{{ s.type }}</span>
           </div>
+          <div v-if="s.progress && s.syncing" class="account-progress">{{ s.progress }}</div>
+          <div v-if="s.last_error" class="account-error">{{ s.last_error }}</div>
         </div>
-        <div class="sync-status" :class="{running: s.syncing, done: !s.syncing && s.last_sync, error: s.last_error}">
+        <div class="sync-status" :class="{running: s.syncing, done: !s.syncing && s.last_sync, error: s.last_error && !s.syncing}">
           <span v-if="s.syncing" class="spinner"></span>
           <span v-if="s.syncing">Syncing...</span>
           <span v-else-if="s.last_error">Error</span>
           <span v-else-if="s.last_sync">{{ s.new_messages ? "+" + s.new_messages + " new" : "Up to date" }}</span>
           <span v-else>Never synced</span>
         </div>
-        <button class="btn btn-sm" @click="triggerSync(s.id)" :disabled="s.syncing">Sync</button>
+        <button v-if="s.syncing" class="btn btn-sm btn-danger" @click="stopSync(s.id)">Stop</button>
+        <button v-else class="btn btn-sm" @click="triggerSync(s.id)">Sync</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import PST/OST View -->
+  <div v-if="view === 'import'" class="container">
+    <div class="page-title">
+      <span>Import PST / OST</span>
+    </div>
+    <div class="card">
+      <div class="card-body">
+        <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:1.5rem">
+          Upload a Microsoft Outlook PST or OST file to import emails. Files up to 10GB+ are supported via streaming upload.
+        </p>
+        <div class="form-group">
+          <label>Title (account name)</label>
+          <input class="form-control" v-model="importTitle" placeholder="My Outlook Archive">
+        </div>
+        <div class="form-group">
+          <label>Select PST/OST file</label>
+          <input type="file" ref="pstFile" class="form-control" accept=".pst,.ost" @change="onPSTFileSelected">
+        </div>
+        <button class="btn btn-primary" @click="startPSTImport" :disabled="importRunning || !importFile">
+          {{ importRunning ? 'Importing...' : 'Upload & Import' }}
+        </button>
+      </div>
+
+      <!-- Import Progress -->
+      <div v-if="importJob" class="import-progress">
+        <div class="progress-header">
+          <span class="progress-phase" :class="importJob.phase">{{ importPhaseLabel }}</span>
+          <span class="progress-detail">{{ importProgressDetail }}</span>
+        </div>
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" :style="{width: importPercent + '%'}"></div>
+        </div>
+        <div v-if="importJob.error" class="account-error" style="margin-top:0.75rem">{{ importJob.error }}</div>
+      </div>
+
+      <!-- Past imports -->
+      <div v-if="importHistory.length" style="border-top:1px solid var(--border);padding:1rem 1.5rem">
+        <h3 style="font-size:0.82rem;color:var(--text-dim);font-weight:600;margin-bottom:0.5rem;text-transform:uppercase">Recent Imports</h3>
+        <div v-for="h in importHistory" :key="h.id" class="account-item" style="padding:0.5rem 0">
+          <div class="account-icon">&#x1F4C2;</div>
+          <div class="account-info">
+            <div class="account-email">{{ h.filename }}</div>
+            <div class="account-meta">
+              <span class="badge" :class="'badge-' + h.phase">{{ h.phase }}</span>
+              <span v-if="h.current">{{ h.current }} messages</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

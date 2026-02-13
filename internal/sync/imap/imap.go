@@ -3,6 +3,7 @@
 package imap
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"fmt"
@@ -24,11 +25,24 @@ type SyncState interface {
 	MarkUIDSynced(accountID, folder, uid string) error
 }
 
+// ProgressFunc is called with human-readable progress updates during sync.
+type ProgressFunc func(msg string)
+
 // Sync downloads new emails from an IMAP account.
 // Returns (newMessages, error). NEVER deletes or marks messages on the server.
 func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+	return SyncWithContext(context.Background(), acct, emailDir, state, nil)
+}
+
+// SyncWithContext downloads new emails with cancellation and progress reporting.
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState, onProgress ProgressFunc) (int, error) {
+	if onProgress == nil {
+		onProgress = func(string) {}
+	}
+
 	addr := net.JoinHostPort(acct.Host, fmt.Sprintf("%d", acct.Port))
 	log.Printf("IMAP: connecting to %s as %s", addr, acct.Email)
+	onProgress("connecting to " + acct.Host)
 
 	var conn net.Conn
 	var err error
@@ -52,6 +66,7 @@ func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error
 		return 0, fmt.Errorf("imap login: %w", err)
 	}
 	log.Printf("IMAP: logged in to %s", acct.Host)
+	onProgress("logged in, listing folders")
 
 	folders, err := client.listFolders(acct.Folders)
 	if err != nil {
@@ -60,9 +75,21 @@ func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error
 	log.Printf("IMAP: %d folders to sync", len(folders))
 
 	totalNew := 0
-	for _, folder := range folders {
-		n, err := syncFolder(client, acct, folder, emailDir, state)
+	for fi, folder := range folders {
+		// Check for cancellation between folders.
+		select {
+		case <-ctx.Done():
+			log.Printf("IMAP: sync cancelled for %s after %d folders, %d messages", acct.Email, fi, totalNew)
+			return totalNew, ctx.Err()
+		default:
+		}
+
+		onProgress(fmt.Sprintf("folder %d/%d: %s", fi+1, len(folders), folder))
+		n, err := syncFolderWithContext(ctx, client, acct, folder, emailDir, state)
 		if err != nil {
+			if ctx.Err() != nil {
+				return totalNew, ctx.Err()
+			}
 			log.Printf("WARN: IMAP folder %q: %v", folder, err)
 			continue
 		}
@@ -73,7 +100,13 @@ func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error
 	return totalNew, nil
 }
 
+const fetchBatchSize = 50
+
 func syncFolder(client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState) (int, error) {
+	return syncFolderWithContext(context.Background(), client, acct, folder, emailDir, state)
+}
+
+func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState) (int, error) {
 	folderPath := imapFolderToPath(folder)
 	dir := filepath.Join(emailDir, folderPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -85,34 +118,78 @@ func syncFolder(client *imapClient, acct model.EmailAccount, folder, emailDir st
 		return 0, err
 	}
 
-	newCount := 0
+	// Filter to only new UIDs (not yet synced).
+	var newUIDs []int
 	for _, uid := range uids {
-		uidStr := fmt.Sprintf("%d", uid)
-		if state.IsUIDSynced(acct.ID, folder, uidStr) {
-			continue
+		if !state.IsUIDSynced(acct.ID, folder, fmt.Sprintf("%d", uid)) {
+			newUIDs = append(newUIDs, uid)
 		}
+	}
 
-		raw, err := client.fetch(uid)
+	if len(newUIDs) == 0 {
+		return 0, nil
+	}
+
+	log.Printf("IMAP: folder %q: %d new of %d total", folder, len(newUIDs), len(uids))
+
+	newCount := 0
+	// Fetch in batches (like Python's IMAPClient batch of 100).
+	for i := 0; i < len(newUIDs); i += fetchBatchSize {
+		// Check for cancellation between batches.
+		select {
+		case <-ctx.Done():
+			return newCount, ctx.Err()
+		default:
+		}
+		end := i + fetchBatchSize
+		if end > len(newUIDs) {
+			end = len(newUIDs)
+		}
+		batch := newUIDs[i:end]
+
+		messages, err := client.fetchBatch(batch)
 		if err != nil {
-			log.Printf("WARN: fetch UID %d: %v", uid, err)
+			log.Printf("WARN: batch fetch in %q: %v", folder, err)
+			// Fall back to one-by-one for this batch.
+			for _, uid := range batch {
+				raw, err := client.fetch(uid)
+				if err != nil {
+					log.Printf("WARN: fetch UID %d: %v", uid, err)
+					continue
+				}
+				if saveEmail(dir, uid, raw, acct.ID, folder, state) {
+					newCount++
+				}
+			}
 			continue
 		}
 
-		checksum := contentChecksum(raw)
-		filename := fmt.Sprintf("%s-%d.eml", checksum, uid)
-		path := filepath.Join(dir, filename)
-
-		if err := os.WriteFile(path, raw, 0o644); err != nil {
-			log.Printf("WARN: write %s: %v", path, err)
-			continue
+		for uid, raw := range messages {
+			if saveEmail(dir, uid, raw, acct.ID, folder, state) {
+				newCount++
+			}
 		}
-
-		setFileMtime(path, raw)
-		state.MarkUIDSynced(acct.ID, folder, uidStr)
-		newCount++
 	}
 
 	return newCount, nil
+}
+
+func saveEmail(dir string, uid int, raw []byte, accountID, folder string, state SyncState) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	checksum := contentChecksum(raw)
+	filename := fmt.Sprintf("%s-%d.eml", checksum, uid)
+	path := filepath.Join(dir, filename)
+
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		log.Printf("WARN: write %s: %v", path, err)
+		return false
+	}
+
+	setFileMtime(path, raw)
+	state.MarkUIDSynced(accountID, folder, fmt.Sprintf("%d", uid))
+	return true
 }
 
 // contentChecksum returns the first 16 hex chars of SHA-256.
@@ -122,16 +199,74 @@ func contentChecksum(data []byte) string {
 }
 
 // setFileMtime sets the file's modification time from the email Date header.
+// Falls back to the first Received header if Date is missing or unparseable.
 func setFileMtime(path string, raw []byte) {
 	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
 	if err != nil {
 		return
 	}
-	date, err := msg.Header.Date()
-	if err != nil || date.IsZero() {
+	date, _ := msg.Header.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(msg.Header.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(msg.Header)
+	}
+	if date.IsZero() {
 		return
 	}
 	os.Chtimes(path, date, date)
+}
+
+// parseDateFuzzy tries multiple date layouts for non-standard Date headers.
+func parseDateFuzzy(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	for _, layout := range []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		"Mon, 2 Jan 2006 15:04:05 -0700 (MST)",
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"Mon, 2 Jan 2006 15:04:05",
+		"2 Jan 2006 15:04:05 -0700",
+		"2 Jan 2006 15:04:05",
+		time.RFC822Z,
+		time.RFC822,
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+// parseReceivedDate extracts the date from the first Received header.
+func parseReceivedDate(h mail.Header) time.Time {
+	received := h.Get("Received")
+	if received == "" {
+		return time.Time{}
+	}
+	idx := strings.LastIndex(received, ";")
+	if idx < 0 {
+		return time.Time{}
+	}
+	dateStr := strings.TrimSpace(received[idx+1:])
+	for _, layout := range []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		"Mon, 2 Jan 2006 15:04:05 -0700 (MST)",
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"2 Jan 2006 15:04:05 -0700",
+		time.RFC822Z,
+		time.RFC822,
+	} {
+		if t, err := time.Parse(layout, dateStr); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // --- IMAP folder name to filesystem path mapping ---
@@ -201,16 +336,18 @@ func imapFolderToPath(folderName string) string {
 	return strings.Join(slugs, "/")
 }
 
-// --- Minimal IMAP client (stdlib net/textproto based) ---
+// --- Minimal IMAP client (buffered, UID-based) ---
 // A lightweight IMAP client for sync-only operations.
+// Uses UID commands (stable across sessions) and proper literal parsing.
 
 type imapClient struct {
 	conn net.Conn
+	buf  []byte // read buffer
 	tag  int
 }
 
 func newIMAPClient(conn net.Conn) (*imapClient, error) {
-	c := &imapClient{conn: conn}
+	c := &imapClient{conn: conn, buf: make([]byte, 0, 8192)}
 	// Read server greeting.
 	if _, err := c.readLine(); err != nil {
 		return nil, err
@@ -242,22 +379,60 @@ func (c *imapClient) command(format string, args ...any) ([]string, error) {
 	}
 }
 
+// readLine reads one CRLF-terminated line using a buffered approach.
 func (c *imapClient) readLine() (string, error) {
-	buf := make([]byte, 0, 4096)
-	one := make([]byte, 1)
 	for {
-		c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-		n, err := c.conn.Read(one)
-		if err != nil {
-			return string(buf), err
+		// Check if buffer already contains a full line.
+		if idx := indexOf(c.buf, '\n'); idx >= 0 {
+			line := string(c.buf[:idx])
+			c.buf = c.buf[idx+1:]
+			return strings.TrimRight(line, "\r"), nil
 		}
+		// Read more data into buffer.
+		c.conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		tmp := make([]byte, 8192)
+		n, err := c.conn.Read(tmp)
 		if n > 0 {
-			buf = append(buf, one[0])
-			if one[0] == '\n' {
-				return strings.TrimRight(string(buf), "\r\n"), nil
+			c.buf = append(c.buf, tmp[:n]...)
+		}
+		if err != nil {
+			// Return what we have if buffer is non-empty.
+			if len(c.buf) > 0 {
+				line := string(c.buf)
+				c.buf = c.buf[:0]
+				return strings.TrimRight(line, "\r\n"), err
 			}
+			return "", err
 		}
 	}
+}
+
+// readExact reads exactly n bytes from the connection (for IMAP literals).
+func (c *imapClient) readExact(n int) ([]byte, error) {
+	for len(c.buf) < n {
+		c.conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		tmp := make([]byte, 8192)
+		nr, err := c.conn.Read(tmp)
+		if nr > 0 {
+			c.buf = append(c.buf, tmp[:nr]...)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	data := make([]byte, n)
+	copy(data, c.buf[:n])
+	c.buf = c.buf[n:]
+	return data, nil
+}
+
+func indexOf(b []byte, c byte) int {
+	for i, v := range b {
+		if v == c {
+			return i
+		}
+	}
+	return -1
 }
 
 func (c *imapClient) login(user, password string) error {
@@ -307,12 +482,14 @@ func (c *imapClient) listFolders(foldersCfg string) ([]string, error) {
 	return folders, nil
 }
 
+// selectAndSearch uses UID SEARCH to get stable UIDs (like Python's IMAPClient).
+// Sequence numbers change between sessions; UIDs are persistent.
 func (c *imapClient) selectAndSearch(folder string) ([]int, error) {
 	_, err := c.command(`SELECT "%s"`, folder)
 	if err != nil {
 		return nil, err
 	}
-	lines, err := c.command("SEARCH ALL")
+	lines, err := c.command("UID SEARCH ALL")
 	if err != nil {
 		return nil, err
 	}
@@ -331,25 +508,86 @@ func (c *imapClient) selectAndSearch(folder string) ([]int, error) {
 	return uids, nil
 }
 
+// fetch retrieves a single email by UID.
 func (c *imapClient) fetch(uid int) ([]byte, error) {
-	lines, err := c.command("FETCH %d RFC822", uid)
+	result, err := c.fetchBatch([]int{uid})
 	if err != nil {
 		return nil, err
 	}
-	// Collect raw message data from FETCH response.
-	var data []byte
-	collecting := false
-	for _, line := range lines {
-		if strings.Contains(line, "RFC822") && strings.Contains(line, "{") {
-			collecting = true
+	if raw, ok := result[uid]; ok {
+		return raw, nil
+	}
+	return nil, fmt.Errorf("UID %d not in FETCH response", uid)
+}
+
+// fetchBatch retrieves multiple emails in one UID FETCH command.
+// Returns map[uid]rawBytes. Matches Python's `client.fetch(batch, ["RFC822"])`.
+func (c *imapClient) fetchBatch(uids []int) (map[int][]byte, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
+
+	// Build UID set string: "1,2,3,4,5"
+	parts := make([]string, len(uids))
+	for i, uid := range uids {
+		parts[i] = fmt.Sprintf("%d", uid)
+	}
+	uidSet := strings.Join(parts, ",")
+
+	c.tag++
+	tag := fmt.Sprintf("A%04d", c.tag)
+	cmd := fmt.Sprintf("%s UID FETCH %s RFC822\r\n", tag, uidSet)
+	if _, err := c.conn.Write([]byte(cmd)); err != nil {
+		return nil, err
+	}
+
+	result := make(map[int][]byte)
+	for {
+		line, err := c.readLine()
+		if err != nil {
+			return result, fmt.Errorf("fetchBatch: %w", err)
+		}
+
+		// Tag line = end of response.
+		if strings.HasPrefix(line, tag+" ") {
+			if strings.Contains(line, "OK") {
+				return result, nil
+			}
+			return result, fmt.Errorf("IMAP fetch error: %s", line)
+		}
+
+		// Look for: * N FETCH (UID NNN RFC822 {size})
+		if !strings.Contains(line, "{") {
 			continue
 		}
-		if collecting {
-			if strings.HasPrefix(line, ")") {
-				break
-			}
-			data = append(data, []byte(line+"\r\n")...)
+
+		// Extract UID from the response line.
+		// Format: * <seq> FETCH (UID <uid> RFC822 {<size>})
+		// or:     * <seq> FETCH (RFC822 {<size>} UID <uid>)
+		msgUID := 0
+		if idx := strings.Index(strings.ToUpper(line), "UID "); idx >= 0 {
+			fmt.Sscanf(line[idx+4:], "%d", &msgUID)
+		}
+
+		// Extract literal size.
+		braceStart := strings.LastIndex(line, "{")
+		braceEnd := strings.LastIndex(line, "}")
+		if braceStart < 0 || braceEnd <= braceStart {
+			continue
+		}
+		var size int
+		if _, err := fmt.Sscanf(line[braceStart:braceEnd+1], "{%d}", &size); err != nil || size <= 0 {
+			continue
+		}
+
+		// Read exactly `size` bytes of literal data.
+		rawData, err := c.readExact(size)
+		if err != nil {
+			return result, fmt.Errorf("fetchBatch literal UID %d: %w", msgUID, err)
+		}
+
+		if msgUID > 0 {
+			result[msgUID] = rawData
 		}
 	}
-	return data, nil
 }

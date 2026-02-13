@@ -25,6 +25,8 @@
         selectedEmail: null,
         loading: false,
         syncStatuses: [],
+        syncStatusMap: {},
+        accountPollTimer: null,
         showAddAccount: false,
         editingAccount: null,
         newAccount: {
@@ -38,7 +40,13 @@
           sync: { interval: '5m', enabled: true }
         },
         toasts: [],
-        debounceTimer: null
+        debounceTimer: null,
+        importTitle: '',
+        importFile: null,
+        importRunning: false,
+        importJob: null,
+        importHistory: [],
+        importPollTimer: null
       }
     },
 
@@ -46,6 +54,44 @@
       totalPages: function () {
         if (!this.searchResults) return 0
         return Math.ceil(this.searchResults.total / this.pageSize)
+      },
+
+      importPhaseLabel: function () {
+        if (!this.importJob) return ''
+        var labels = {
+          uploading: 'Uploading...',
+          extracting: 'Extracting messages...',
+          indexing: 'Building search index...',
+          done: 'Import complete',
+          error: 'Import failed'
+        }
+        return labels[this.importJob.phase] || this.importJob.phase
+      },
+
+      importProgressDetail: function () {
+        if (!this.importJob) return ''
+        var j = this.importJob
+        if (j.phase === 'uploading' && j.total > 0) {
+          return j.current + ' / ' + j.total + ' MB'
+        }
+        if (j.phase === 'extracting') {
+          return j.current + ' messages'
+        }
+        if (j.phase === 'done') {
+          return j.current + ' messages imported'
+        }
+        return ''
+      },
+
+      importPercent: function () {
+        if (!this.importJob) return 0
+        var j = this.importJob
+        if (j.phase === 'done') return 100
+        if (j.phase === 'error') return 0
+        if (j.total > 0) return Math.min(99, Math.round(j.current / j.total * 100))
+        if (j.phase === 'extracting' && j.current > 0) return 50
+        if (j.phase === 'indexing') return 90
+        return 0
       }
     },
 
@@ -53,6 +99,7 @@
       this.loadUser()
       this.loadAccounts()
       this.doSearch('', 0)
+      this.startSyncPoll()
 
       // Handle browser back/forward.
       var self = this
@@ -74,6 +121,8 @@
         } else if (hash === '#/sync') {
           this.view = 'sync'
           this.loadSyncStatus()
+        } else if (hash === '#/import') {
+          this.view = 'import'
         } else {
           this.view = 'search'
         }
@@ -185,7 +234,7 @@
       },
 
       accountIcon: function (type) {
-        var icons = { IMAP: '\u{1F4E8}', POP3: '\u{1F4EC}', GMAIL_API: '\u{1F4E7}' }
+        var icons = { IMAP: '\u{1F4E8}', POP3: '\u{1F4EC}', GMAIL_API: '\u{1F4E7}', PST: '\u{1F4C2}' }
         return icons[type] || '\u{1F4E7}'
       },
 
@@ -300,6 +349,60 @@
         })
       },
 
+      stopSync: function (accountID) {
+        var self = this
+        $.ajax({
+          url: '/api/sync/stop',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ account_id: accountID })
+        }).done(function () {
+          self.showToast('Sync stopped', 'warning')
+          self.refreshSyncStatus()
+        }).fail(function () {
+          self.showToast('Failed to stop sync', 'error')
+        })
+      },
+
+      accountSyncStatus: function (accountID) {
+        return this.syncStatusMap[accountID] || {}
+      },
+
+      startSyncPoll: function () {
+        var self = this
+        this.refreshSyncStatus()
+        this.accountPollTimer = setInterval(function () {
+          self.refreshSyncStatus()
+        }, 3000)
+      },
+
+      refreshSyncStatus: function () {
+        var self = this
+        $.getJSON('/api/sync/status').done(function (data) {
+          self.syncStatuses = data || []
+          var m = {}
+          for (var i = 0; i < (data || []).length; i++) {
+            m[data[i].id] = data[i]
+          }
+          self.syncStatusMap = m
+
+          // Show error notifications for accounts with errors.
+          for (var j = 0; j < (data || []).length; j++) {
+            var s = data[j]
+            if (s.last_error && !s.syncing) {
+              var key = 'sync_error_' + s.id
+              if (!self._shownErrors) self._shownErrors = {}
+              if (!self._shownErrors[key]) {
+                self._shownErrors[key] = true
+                self.showToast(s.name + ': ' + s.last_error, 'error')
+              }
+            } else {
+              if (self._shownErrors) delete self._shownErrors['sync_error_' + s.id]
+            }
+          }
+        })
+      },
+
       pollSyncStatus: function () {
         var self = this
         var poll = setInterval(function () {
@@ -337,6 +440,80 @@
         if (bytes < 1024) return bytes + ' B'
         if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
         return (bytes / 1048576).toFixed(1) + ' MB'
+      },
+
+      // --- PST/OST Import ---
+      onPSTFileSelected: function (e) {
+        this.importFile = e.target.files[0] || null
+        if (this.importFile && !this.importTitle) {
+          this.importTitle = this.importFile.name.replace(/\.(pst|ost)$/i, '')
+        }
+      },
+
+      startPSTImport: function () {
+        if (!this.importFile) return
+        var self = this
+        this.importRunning = true
+        this.importJob = { phase: 'uploading', current: 0, total: 0 }
+
+        var formData = new FormData()
+        formData.append('file', this.importFile)
+        formData.append('title', this.importTitle || this.importFile.name)
+
+        $.ajax({
+          url: '/api/import/pst',
+          type: 'POST',
+          data: formData,
+          processData: false,
+          contentType: false,
+          xhr: function () {
+            var xhr = new XMLHttpRequest()
+            xhr.upload.addEventListener('progress', function (e) {
+              if (e.lengthComputable) {
+                self.importJob = {
+                  phase: 'uploading',
+                  current: Math.round(e.loaded / (1024 * 1024)),
+                  total: Math.round(e.total / (1024 * 1024))
+                }
+              }
+            })
+            return xhr
+          }
+        }).done(function (data) {
+          self.importJob = { id: data.job_id, phase: 'extracting', current: 0, total: 0 }
+          self.pollImportStatus(data.job_id)
+          self.showToast('Upload complete, extracting messages...', 'success')
+        }).fail(function (xhr) {
+          self.importRunning = false
+          var msg = 'Upload failed'
+          try { msg = JSON.parse(xhr.responseText).error } catch (e) {}
+          self.importJob = { phase: 'error', error: msg }
+          self.showToast(msg, 'error')
+        })
+      },
+
+      pollImportStatus: function (jobID) {
+        var self = this
+        if (this.importPollTimer) clearInterval(this.importPollTimer)
+        this.importPollTimer = setInterval(function () {
+          $.getJSON('/api/import/status/' + jobID).done(function (data) {
+            self.importJob = data
+            if (data.phase === 'done') {
+              clearInterval(self.importPollTimer)
+              self.importPollTimer = null
+              self.importRunning = false
+              self.importHistory.unshift(data)
+              self.loadAccounts()
+              self.showToast('Import complete: ' + data.current + ' messages', 'success')
+            } else if (data.phase === 'error') {
+              clearInterval(self.importPollTimer)
+              self.importPollTimer = null
+              self.importRunning = false
+              self.importHistory.unshift(data)
+              self.showToast('Import failed: ' + data.error, 'error')
+            }
+          })
+        }, 1500)
       },
 
       pagerRange: function () {

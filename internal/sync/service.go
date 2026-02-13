@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -8,17 +9,26 @@ import (
 
 	"github.com/eslider/mails/internal/account"
 	"github.com/eslider/mails/internal/model"
+	"github.com/eslider/mails/internal/search/index"
 	sync_gmail "github.com/eslider/mails/internal/sync/gmail"
 	sync_imap "github.com/eslider/mails/internal/sync/imap"
 	sync_pop3 "github.com/eslider/mails/internal/sync/pop3"
 )
+
+// syncEntry tracks a running sync's cancel function and progress.
+type syncEntry struct {
+	cancel    context.CancelFunc
+	startedAt time.Time
+	progress  string // human-readable status
+	lastError string
+}
 
 // Service orchestrates email sync for all accounts of a user.
 type Service struct {
 	mu       sync.Mutex
 	usersDir string
 	accounts *account.Store
-	running  map[string]bool // accountID -> syncing
+	running  map[string]*syncEntry // accountID -> entry
 }
 
 // NewService creates a sync service.
@@ -26,22 +36,29 @@ func NewService(usersDir string, accounts *account.Store) *Service {
 	return &Service{
 		usersDir: usersDir,
 		accounts: accounts,
-		running:  make(map[string]bool),
+		running:  make(map[string]*syncEntry),
 	}
 }
 
 // SyncAccount triggers a sync for a single account. Non-blocking; runs in background.
 func (s *Service) SyncAccount(userID, accountID string) error {
 	s.mu.Lock()
-	if s.running[accountID] {
+	if e, ok := s.running[accountID]; ok && e != nil {
 		s.mu.Unlock()
 		return fmt.Errorf("sync already running for account %s", accountID)
 	}
-	s.running[accountID] = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.running[accountID] = &syncEntry{
+		cancel:    cancel,
+		startedAt: time.Now(),
+		progress:  "starting",
+	}
 	s.mu.Unlock()
 
 	go func() {
 		defer func() {
+			cancel()
 			s.mu.Lock()
 			delete(s.running, accountID)
 			s.mu.Unlock()
@@ -49,12 +66,14 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 
 		acct, err := s.accounts.Get(userID, accountID)
 		if err != nil {
+			s.setProgress(accountID, "", "account not found: "+err.Error())
 			log.Printf("ERROR: sync account %s: %v", accountID, err)
 			return
 		}
 
 		stateDB, err := OpenStateDB(s.usersDir, userID)
 		if err != nil {
+			s.setProgress(accountID, "", "state db error: "+err.Error())
 			log.Printf("ERROR: open sync state: %v", err)
 			return
 		}
@@ -62,6 +81,7 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 
 		job, err := stateDB.CreateJob(accountID)
 		if err != nil {
+			s.setProgress(accountID, "", "create job error: "+err.Error())
 			log.Printf("ERROR: create sync job: %v", err)
 			return
 		}
@@ -69,7 +89,17 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 		stateDB.UpdateJob(job)
 
 		emailDir := account.EmailDir(s.usersDir, userID, *acct)
-		newMsgs, syncErr := s.doSync(*acct, emailDir, stateDB)
+		indexPath := account.IndexPath(s.usersDir, userID, *acct)
+
+		// Start live indexing goroutine: rebuild index every 5s during sync.
+		indexCtx, indexCancel := context.WithCancel(ctx)
+		go s.liveIndex(indexCtx, emailDir, indexPath, accountID)
+
+		s.setProgress(accountID, "syncing", "")
+		newMsgs, syncErr := s.doSync(ctx, *acct, emailDir, stateDB, accountID)
+
+		// Stop live indexing.
+		indexCancel()
 
 		now := time.Now()
 		job.FinishedAt = &now
@@ -77,14 +107,34 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 		if syncErr != nil {
 			job.Status = model.SyncStatusFailed
 			job.Error = syncErr.Error()
+			s.setProgress(accountID, "", syncErr.Error())
 			log.Printf("ERROR: sync %s (%s): %v", acct.Email, acct.Type, syncErr)
 		} else {
 			job.Status = model.SyncStatusDone
+			s.setProgress(accountID, "done", "")
 			log.Printf("INFO: synced %s (%s): %d new messages", acct.Email, acct.Type, newMsgs)
 		}
 		stateDB.UpdateJob(job)
+
+		// Final index rebuild after sync completes.
+		s.rebuildIndex(emailDir, indexPath)
 	}()
 
+	return nil
+}
+
+// StopSync cancels a running sync for the given account.
+func (s *Service) StopSync(accountID string) error {
+	s.mu.Lock()
+	entry, ok := s.running[accountID]
+	s.mu.Unlock()
+
+	if !ok || entry == nil {
+		return fmt.Errorf("no sync running for account %s", accountID)
+	}
+
+	entry.cancel()
+	log.Printf("INFO: sync cancelled for account %s", accountID)
 	return nil
 }
 
@@ -110,17 +160,29 @@ func (s *Service) SyncAll(userID string) error {
 func (s *Service) IsRunning(accountID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.running[accountID]
+	_, ok := s.running[accountID]
+	return ok
 }
 
 // AccountStatus returns the current sync status for a single account.
 func (s *Service) AccountStatus(userID string, acct model.EmailAccount) map[string]any {
+	syncing := s.IsRunning(acct.ID)
 	status := map[string]any{
 		"id":      acct.ID,
 		"name":    acct.Email,
 		"type":    string(acct.Type),
-		"syncing": s.IsRunning(acct.ID),
+		"syncing": syncing,
 	}
+
+	s.mu.Lock()
+	if entry, ok := s.running[acct.ID]; ok {
+		status["progress"] = entry.progress
+		status["started_at"] = entry.startedAt.Unix()
+		if entry.lastError != "" {
+			status["last_error"] = entry.lastError
+		}
+	}
+	s.mu.Unlock()
 
 	stateDB, err := OpenStateDB(s.usersDir, userID)
 	if err == nil {
@@ -130,7 +192,7 @@ func (s *Service) AccountStatus(userID string, acct model.EmailAccount) map[stri
 				status["last_sync"] = job.FinishedAt.Unix()
 			}
 			status["new_messages"] = job.NewMessages
-			if job.Error != "" {
+			if job.Error != "" && !syncing {
 				status["last_error"] = job.Error
 			}
 		}
@@ -139,10 +201,28 @@ func (s *Service) AccountStatus(userID string, acct model.EmailAccount) map[stri
 	return status
 }
 
-func (s *Service) doSync(acct model.EmailAccount, emailDir string, stateDB *StateDB) (int, error) {
+func (s *Service) setProgress(accountID, progress, lastError string) {
+	s.mu.Lock()
+	if entry, ok := s.running[accountID]; ok {
+		if progress != "" {
+			entry.progress = progress
+		}
+		if lastError != "" {
+			entry.lastError = lastError
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Service) doSync(ctx context.Context, acct model.EmailAccount, emailDir string, stateDB *StateDB, accountID string) (int, error) {
+	// Progress callback: update in-memory progress visible via API.
+	onProgress := func(msg string) {
+		s.setProgress(accountID, msg, "")
+	}
+
 	switch acct.Type {
 	case model.AccountTypeIMAP:
-		return sync_imap.Sync(acct, emailDir, stateDB)
+		return sync_imap.SyncWithContext(ctx, acct, emailDir, stateDB, onProgress)
 	case model.AccountTypePOP3:
 		return sync_pop3.Sync(acct, emailDir, stateDB)
 	case model.AccountTypeGmailAPI:
@@ -150,4 +230,32 @@ func (s *Service) doSync(acct model.EmailAccount, emailDir string, stateDB *Stat
 	default:
 		return 0, fmt.Errorf("unsupported account type: %s", acct.Type)
 	}
+}
+
+// liveIndex rebuilds the search index every 5 seconds while sync is running.
+func (s *Service) liveIndex(ctx context.Context, emailDir, indexPath, accountID string) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.rebuildIndex(emailDir, indexPath)
+			s.setProgress(accountID, "syncing (index updated)", "")
+		}
+	}
+}
+
+func (s *Service) rebuildIndex(emailDir, indexPath string) {
+	idx, err := index.New(emailDir, indexPath)
+	if err != nil {
+		log.Printf("WARN: live index open: %v", err)
+		return
+	}
+	defer idx.Close()
+	idx.ClearCache()
+	idx.Build()
+	log.Printf("INFO: index rebuilt (%d emails)", idx.Stats().TotalEmails)
 }

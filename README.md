@@ -11,8 +11,11 @@ Multi-user email archival system with search. Syncs emails from IMAP, POP3, and 
 - **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
 - **Multi-account** — each user manages their own email accounts
 - **Protocol support** — IMAP, POP3, Gmail API
+- **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
 - **Deduplication** — SHA-256 content checksums prevent duplicate storage
 - **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
+- **Live sync** — cancel running syncs, real-time progress, auto-reindex every 5s
+- **Date preservation** — file mtime set from email Date/Received headers
 - **UUIDv7 IDs** — time-ordered identifiers for all entities
 - **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
 - **Per-user isolation** — all data under `users/{uuid}/`
@@ -93,19 +96,20 @@ users/
 ## Architecture
 
 ```
-cmd/mails/         → Entry point, CLI
+cmd/mails/         → Entry point, CLI (serve, fix-dates, version)
 internal/
   auth/            → OAuth2 (GitHub, Google, Facebook), sessions
   user/            → User storage (users/{uuid}/)
   account/         → Email account CRUD (accounts.yml)
   model/           → Shared types (User, Account, SyncJob)
-  sync/            → Sync orchestration
-    imap/          → IMAP protocol sync
+  sync/            → Sync orchestration, live indexing, cancel support
+    imap/          → IMAP protocol sync (UID-based, context-aware)
     pop3/          → POP3 protocol sync
     gmail/         → Gmail API sync
+    pst/           → PST/OST file import (go-pst)
   search/
-    eml/           → .eml parser (charset, MIME, attachments)
-    index/         → DuckDB search index → Parquet
+    eml/           → .eml parser (charset, MIME, fuzzy date parsing)
+    index/         → DuckDB search index → Parquet (with cache cleanup)
     vector/        → Qdrant similarity search
   web/             → Chi router, HTTP handlers
 web/
@@ -120,6 +124,9 @@ go build ./cmd/mails
 
 # Run locally
 DATA_DIR=./users ./mails serve
+
+# Fix file timestamps on all .eml files
+./mails fix-dates
 
 # Run unit tests
 go test ./...
@@ -201,6 +208,15 @@ curl -b cookies.txt http://localhost:8080/api/accounts
 
 # Trigger sync
 curl -b cookies.txt -X POST http://localhost:8080/api/sync
+
+# Stop a running sync
+curl -b cookies.txt -X POST http://localhost:8080/api/sync/stop   -H 'Content-Type: application/json' -d '{"account_id":"..."}'
+
+# Import PST/OST file
+curl -b cookies.txt -X POST http://localhost:8080/api/import/pst   -F "file=@archive.pst" -F "title=My Outlook Archive"
+
+# Check import progress
+curl -b cookies.txt http://localhost:8080/api/import/status/{job_id}
 ```
 
 ## License

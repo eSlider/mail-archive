@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/mail"
+	"net/textproto"
 	"os"
 	"regexp"
 	"strings"
@@ -82,6 +83,12 @@ func ParseFile(path string) (Email, error) {
 	h := msg.Header
 	date, _ := h.Date()
 	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
+	if date.IsZero() {
 		date = info.ModTime()
 	}
 
@@ -100,6 +107,70 @@ func ParseFile(path string) (Email, error) {
 		Size:     info.Size(),
 		BodyText: bodyText,
 	}, nil
+}
+
+// parseDateFuzzy tries multiple date layouts to handle non-standard Date headers
+// (e.g. missing timezone, unconventional formats).
+func parseDateFuzzy(raw string) time.Time {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}
+	}
+	// Try common non-standard date formats.
+	for _, layout := range []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		"Mon, 2 Jan 2006 15:04:05 -0700 (MST)",
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"Mon, 2 Jan 2006 15:04:05",
+		"2 Jan 2006 15:04:05 -0700",
+		"2 Jan 2006 15:04:05",
+		time.RFC822Z,
+		time.RFC822,
+		"Mon, 02 Jan 2006 15:04:05 -0700 (MST)",
+		"Mon, 02 Jan 2006 15:04:05 -0700",
+		"Mon, 02 Jan 2006 15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"01-02-2006",
+	} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+// parseReceivedDate extracts the date from the first (most recent) Received header.
+// Format: "Received: ... ; <date>"
+func parseReceivedDate(h textproto.MIMEHeader) time.Time {
+	received := h.Values("Received")
+	if len(received) == 0 {
+		return time.Time{}
+	}
+	// The most recent Received header is the first one. The date is after the last ";".
+	for _, r := range received {
+		idx := strings.LastIndex(r, ";")
+		if idx < 0 {
+			continue
+		}
+		dateStr := strings.TrimSpace(r[idx+1:])
+		for _, layout := range []string{
+			time.RFC1123Z,
+			time.RFC1123,
+			"Mon, 2 Jan 2006 15:04:05 -0700 (MST)",
+			"Mon, 2 Jan 2006 15:04:05 -0700",
+			"2 Jan 2006 15:04:05 -0700",
+			time.RFC822Z,
+			time.RFC822,
+		} {
+			if t, err := time.Parse(layout, dateStr); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // extractBodyText walks the MIME structure and returns the first usable
@@ -296,6 +367,12 @@ func ParseFileFull(path string) (FullEmail, error) {
 
 	h := msg.Header
 	date, _ := h.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
 	if date.IsZero() {
 		date = info.ModTime()
 	}

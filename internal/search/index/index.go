@@ -84,6 +84,21 @@ func (idx *Index) Close() error {
 	return nil
 }
 
+// ClearCache drops the in-memory table and removes the cached Parquet file.
+// Call before Build() to ensure a fully clean rebuild.
+func (idx *Index) ClearCache() {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.db.Exec("DROP TABLE IF EXISTS emails")
+	if idx.indexPath != "" {
+		os.Remove(idx.indexPath)
+	}
+	idx.total = 0
+	idx.buildAt = time.Time{}
+	log.Printf("INFO: index cache cleared (%s)", idx.indexPath)
+}
+
 func (idx *Index) loadParquet() (int, error) {
 	escaped := strings.ReplaceAll(idx.indexPath, "'", "''")
 	if _, err := idx.db.Exec(
