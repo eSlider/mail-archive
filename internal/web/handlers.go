@@ -502,7 +502,6 @@ func handleReindex(cfg Config) http.HandlerFunc {
 					log.Printf("WARN: reindex %s: %v", acct.Email, err)
 					continue
 				}
-				idx.ClearCache()
 				idx.Build()
 				idx.Close()
 				log.Printf("INFO: reindexed %s", acct.Email)
@@ -864,13 +863,10 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 
 		job.AccountID = created.ID
 
-		// Run import in background.
+		// Run import in background via sync service.
 		go func() {
 			defer os.Remove(tmpPath)
 			defer scheduleImportJobCleanup(jobID)
-
-			emailDir := account.EmailDir(cfg.UsersDir, userID, *created)
-			os.MkdirAll(emailDir, 0o755)
 
 			onExtractProgress := func(phase string, current, total int) {
 				importJobsMu.Lock()
@@ -880,7 +876,7 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 				importJobsMu.Unlock()
 			}
 
-			extracted, errCount, importErr := sync_pst.Import(tmpPath, emailDir, onExtractProgress)
+			extracted, errCount, importErr := cfg.Sync.ImportPST(userID, created.ID, tmpPath, onExtractProgress)
 			if importErr != nil {
 				importJobsMu.Lock()
 				job.Phase = "error"
@@ -891,27 +887,6 @@ func handleImportPST(cfg Config) http.HandlerFunc {
 			}
 
 			log.Printf("INFO: PST import %s: %d extracted, %d errors", filename, extracted, errCount)
-
-			// Index the imported emails.
-			importJobsMu.Lock()
-			job.Phase = "indexing"
-			job.Current = 0
-			job.Total = extracted
-			importJobsMu.Unlock()
-
-			indexPath := account.IndexPath(cfg.UsersDir, userID, *created)
-			idx, idxErr := index.New(emailDir, indexPath)
-			if idxErr != nil {
-				importJobsMu.Lock()
-				job.Phase = "error"
-				job.Error = "indexing failed: " + idxErr.Error()
-				importJobsMu.Unlock()
-				log.Printf("ERROR: index after PST import %s: %v", filename, idxErr)
-				return
-			}
-			idx.ClearCache()
-			idx.Build()
-			idx.Close()
 
 			importJobsMu.Lock()
 			job.Phase = "done"

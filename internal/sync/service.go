@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	sync_gmail "github.com/eslider/mails/internal/sync/gmail"
 	sync_imap "github.com/eslider/mails/internal/sync/imap"
 	sync_pop3 "github.com/eslider/mails/internal/sync/pop3"
+	sync_pst "github.com/eslider/mails/internal/sync/pst"
 )
 
 // syncEntry tracks a running sync's cancel function and progress.
@@ -261,7 +263,45 @@ func (s *Service) rebuildIndex(emailDir, indexPath string) {
 		return
 	}
 	defer idx.Close()
-	idx.ClearCache()
 	idx.Build()
 	log.Printf("INFO: index rebuilt (%d emails)", idx.Stats().TotalEmails)
+}
+
+// ImportPST extracts emails from an uploaded PST/OST file into the account's
+// email directory and builds the search index. Runs synchronously; call from
+// a goroutine for non-blocking behavior.
+// Returns (extracted count, error count, error).
+func (s *Service) ImportPST(userID, accountID, pstPath string, onProgress sync_pst.ProgressFunc) (int, int, error) {
+	if onProgress == nil {
+		onProgress = func(string, int, int) {}
+	}
+
+	acct, err := s.accounts.Get(userID, accountID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("account not found: %w", err)
+	}
+
+	if string(acct.Type) != "PST" {
+		return 0, 0, fmt.Errorf("account %s is not a PST account", accountID)
+	}
+
+	emailDir := account.EmailDir(s.usersDir, userID, *acct)
+	if err := os.MkdirAll(emailDir, 0o755); err != nil {
+		return 0, 0, fmt.Errorf("create email dir: %w", err)
+	}
+
+	extracted, errCount, importErr := sync_pst.Import(pstPath, emailDir, onProgress)
+	if importErr != nil {
+		return extracted, errCount, fmt.Errorf("PST import: %w", importErr)
+	}
+
+	indexPath := account.IndexPath(s.usersDir, userID, *acct)
+	idx, idxErr := index.New(emailDir, indexPath)
+	if idxErr != nil {
+		return extracted, errCount, fmt.Errorf("index: %w", idxErr)
+	}
+	idx.Build()
+	idx.Close()
+
+	return extracted, errCount, nil
 }

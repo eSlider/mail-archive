@@ -102,10 +102,6 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 
 const fetchBatchSize = 50
 
-func syncFolder(client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState) (int, error) {
-	return syncFolderWithContext(context.Background(), client, acct, folder, emailDir, state)
-}
-
 func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState) (int, error) {
 	folderPath := imapFolderToPath(folder)
 	dir := filepath.Join(emailDir, folderPath)

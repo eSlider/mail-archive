@@ -60,7 +60,7 @@ func (s *Store) Create(userID string, acct model.EmailAccount) (*model.EmailAcco
 		acct.Sync.Interval = "5m"
 	}
 	// Only default to enabled for syncable account types; PST is import-only.
-	if acct.Type != model.AccountTypePST {
+	if string(acct.Type) != "PST" {
 		acct.Sync.Enabled = true
 	}
 
