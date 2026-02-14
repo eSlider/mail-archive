@@ -1,8 +1,10 @@
 # AGENTS.md — Instructions for AI Agents Working on This Project
 
+> **Contributors:** See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines, API reference, and coding standards.
+
 ## Project Context
 
-This is a **multi-user email archival system** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) per user into a hierarchical structure: `users/{uuid}/{domain}/{local}/{folder}/{checksum}-{id}.eml`. Users authenticate via OAuth2 (GitHub, Google, Facebook). All IDs are UUIDv7.
+This is a **multi-user email archival system** that syncs emails from multiple accounts (IMAP, POP3, Gmail API) per user into a hierarchical structure: `users/{uuid}/{domain}/{local}/{folder}/{checksum}-{id}.eml`. Users authenticate via username/password or OAuth2 (GitHub, Google, Facebook). All IDs are UUIDv7.
 
 ## Architecture
 
@@ -10,24 +12,22 @@ This is a **multi-user email archival system** that syncs emails from multiple a
 mails/
 ├── cmd/mails/           # Application entry point
 ├── internal/
-│   ├── auth/            # OAuth2 login + session management
+│   ├── auth/            # OAuth2 + bcrypt, session management
 │   ├── user/            # User CRUD (users/{uuid}/)
 │   ├── account/         # Per-user email account configs
 │   ├── model/           # Shared types (User, Account, SyncJob)
 │   ├── sync/            # Sync orchestration
 │   │   ├── imap/        # IMAP protocol
 │   │   ├── pop3/        # POP3 protocol
-│   │   └── gmail/       # Gmail API
-│   ├── cmd/
-│   │   ├── mails/         # Main app entry
-│   │   └── mail-search/   # Standalone CLI (optional)
+│   │   ├── gmail/       # Gmail API
+│   │   └── pst/         # PST/OST import
+│   ├── search/
 │   │   ├── eml/         # .eml parser
 │   │   ├── index/       # DuckDB + Parquet
 │   │   └── vector/      # Qdrant + Ollama
 │   └── web/             # Chi HTTP router + handlers
-├── web/
-│   ├── static/          # CSS, JS (local jQuery + Vue.js)
-│   └── templates/       # Go HTML templates
+├── web/static/          # CSS, JS (Vue.js 3, native fetch)
+├── internal/web/templates/  # Go HTML templates
 ├── users/               # Per-user data (gitignored)
 ├── scripts/             # Legacy Python scripts (reference)
 ├── docker-compose.yml
@@ -38,12 +38,12 @@ mails/
 ## Key Design Decisions
 
 - **Multi-user** — each user has isolated data under `users/{uuid}/`
-- **OAuth-only auth** — no password-based registration
+- **Auth** — username/password (bcrypt) or OAuth2 (GitHub, Google, Facebook)
 - **UUIDv7 IDs** — time-ordered for all entities
 - **SHA-256 dedup** — content checksums prevent duplicate emails
 - **SQLite per user** — sync state in `sync.sqlite`
 - **Raw .eml storage** — preserves RFC 822 format
-- **No CDN** — jQuery and Vue.js served locally
+- **No CDN** — Vue.js served locally, native fetch for HTTP
 - **Go backend** — single binary, Chi router
 - **NEVER delete emails** from server — sync is read-only
 
@@ -60,7 +60,7 @@ cmd → internal/web → internal/sync → internal/model
 ## Coding Guidelines
 
 - **NEVER REMOVE EMAILS** from server
-- **Go 1.25+**, strict typing
+- **Go 1.24+**, strict typing
 - **No classes unless necessary** — prefer pure functions
 - **Minimal dependencies** — stdlib first
 - **Comments in English only**
@@ -68,7 +68,7 @@ cmd → internal/web → internal/sync → internal/model
 - All user data in `users/{uuid}/`
 - Keep sync modules independent — each handles one protocol
 - Log everything at INFO level, errors with full tracebacks
-- Frontend: jQuery + Vue.js, plain JavaScript (no TypeScript)
+- Frontend: Vue.js 3, plain JavaScript (no TypeScript), native fetch for API calls
 - Use snake_case import aliases for disambiguation
 
 ## Next Steps (Priority Order)

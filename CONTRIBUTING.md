@@ -2,6 +2,8 @@
 
 Guidelines for contributing to the Mail Archive project. Inspired by [Gitea's backend](https://docs.gitea.com/contributing/guidelines-backend) and [frontend](https://docs.gitea.com/contributing/guidelines-frontend) guidelines.
 
+> **AI agents:** See [AGENTS.md](AGENTS.md) for project context and next steps.
+
 ## Architecture
 
 ```
@@ -17,9 +19,7 @@ mails/
 │   │   ├── pop3/        # POP3 protocol sync
 │   │   ├── gmail/       # Gmail API sync
 │   │   └── pst/         # PST/OST file import (go-pst library)
-│   ├── cmd/
-│   │   ├── mails/       # Main app
-│   │   └── mail-search/ # Standalone search CLI
+│   ├── search/
 │   │   ├── eml/         # .eml file parser
 │   │   ├── index/       # DuckDB + Parquet index
 │   │   └── vector/      # Qdrant similarity search
@@ -28,8 +28,8 @@ mails/
 │   └── static/
 │       ├── css/         # Application styles
 │       └── js/
-│           ├── vendor/  # jQuery 3.7, Vue.js 3.5 (local, no CDN)
-│           └── app/     # App logic + Vue templates (.vue)
+│           ├── vendor/  # Vue.js 3.5 (local, no CDN)
+│           └── app/     # App logic + Vue templates (.vue), native fetch
 ├── users/               # Per-user data (gitignored)
 │   └── {uuid}/
 │       ├── user.json
@@ -147,9 +147,9 @@ internal/web/
 
 ### Stack
 
-- **jQuery 3.7** for DOM manipulation and AJAX
 - **Vue.js 3.5** for reactive UI components
-- **No TypeScript** — plain JavaScript (ECMAScript)
+- **Native fetch** for API calls (no jQuery)
+- **No TypeScript** — plain JavaScript (ES6+)
 - **No CDN** — all resources served locally from `web/static/js/vendor/`
 - **No build step** — no webpack, Vite, or transpiler
 
@@ -182,7 +182,7 @@ app.component('component-name', ComponentDef);
 
 Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsguide.html):
 
-1. Use `var` for compatibility (no `let`/`const` in hot paths if IE11 needed)
+1. Use `const`/`let`, arrow functions, template literals
 2. HTML IDs and classes use **kebab-case** with 2-3 feature keywords
 3. JavaScript-only classes use `js-` prefix
 4. No inline `<style>` or `<script>` — use external files
@@ -191,8 +191,7 @@ Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsg
 ### Framework Usage
 
 - **Vue 3** for reactive components (search, accounts, sync status)
-- **jQuery** for AJAX calls (`$.getJSON`, `$.ajax`) and simple DOM operations
-- Do **NOT** mix Vue and jQuery on the same DOM elements
+- **Native fetch** for API calls — use async/await, handle `Response.ok` and errors
 - Use Vue's `$nextTick` for post-render DOM access
 
 ### CSS Guidelines

@@ -49,7 +49,7 @@ func NewRouter(cfg Config) http.Handler {
 	r.Use(middleware.Compress(5))
 	r.Use(corsMiddleware)
 
-	// Static assets (jQuery, Vue.js, CSS, JS).
+	// Static assets (Vue.js, CSS, JS).
 	if StaticDir != "" {
 		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(StaticDir))))
 	}

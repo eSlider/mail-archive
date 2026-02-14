@@ -1,18 +1,17 @@
-// Mail Archive — Main Application (Vue 3 + jQuery)
+// Mail Archive — Main Application (Vue 3)
 // No TypeScript, no CDN — all resources are local.
 // Template is loaded from main.template.vue at startup (fetched as raw HTML).
 
-(async function () {
+(async () => {
   'use strict';
 
-  // Fetch Vue template before creating the app.
-  var templateResponse = await fetch('/static/js/app/main.template.vue');
-  var templateHTML = await templateResponse.text();
+  const templateResponse = await fetch('/static/js/app/main.template.vue');
+  const templateHTML = await templateResponse.text();
 
-  var App = {
+  const App = {
     template: templateHTML,
 
-    data: function () {
+    data() {
       return {
         view: 'search',   // 'search' | 'accounts' | 'sync' | 'detail'
         user: null,
@@ -49,126 +48,118 @@
         importJob: null,
         importHistory: [],
         importPollTimer: null
-      }
+      };
     },
 
     computed: {
-      totalPages: function () {
-        if (!this.searchResults) return 0
-        return Math.ceil(this.searchResults.total / this.pageSize)
+      totalPages() {
+        if (!this.searchResults) return 0;
+        return Math.ceil(this.searchResults.total / this.pageSize);
       },
 
-      importPhaseLabel: function () {
-        if (!this.importJob) return ''
-        var labels = {
+      importPhaseLabel() {
+        if (!this.importJob) return '';
+        const labels = {
           uploading: 'Uploading...',
           extracting: 'Extracting messages...',
           indexing: 'Building search index...',
           done: 'Import complete',
           error: 'Import failed'
-        }
-        return labels[this.importJob.phase] || this.importJob.phase
+        };
+        return labels[this.importJob.phase] || this.importJob.phase;
       },
 
-      importProgressDetail: function () {
-        if (!this.importJob) return ''
-        var j = this.importJob
-        if (j.phase === 'uploading' && j.total > 0) {
-          return j.current + ' / ' + j.total + ' MB'
-        }
-        if (j.phase === 'extracting') {
-          return j.current + ' messages'
-        }
-        if (j.phase === 'done') {
-          return j.current + ' messages imported'
-        }
-        return ''
+      importProgressDetail() {
+        if (!this.importJob) return '';
+        const j = this.importJob;
+        if (j.phase === 'uploading' && j.total > 0) return `${j.current} / ${j.total} MB`;
+        if (j.phase === 'extracting') return `${j.current} messages`;
+        if (j.phase === 'done') return `${j.current} messages imported`;
+        return '';
       },
 
-      importPercent: function () {
-        if (!this.importJob) return 0
-        var j = this.importJob
-        if (j.phase === 'done') return 100
-        if (j.phase === 'error') return 0
-        if (j.total > 0) return Math.min(99, Math.round(j.current / j.total * 100))
-        if (j.phase === 'extracting' && j.current > 0) return 50
-        if (j.phase === 'indexing') return 90
-        return 0
+      importPercent() {
+        if (!this.importJob) return 0;
+        const j = this.importJob;
+        if (j.phase === 'done') return 100;
+        if (j.phase === 'error') return 0;
+        if (j.total > 0) return Math.min(99, Math.round(j.current / j.total * 100));
+        if (j.phase === 'extracting' && j.current > 0) return 50;
+        if (j.phase === 'indexing') return 90;
+        return 0;
       }
     },
 
-    created: function () {
-      this.loadUser()
-      this.loadAccounts()
-      this.doSearch('', 0)
-      this.startSyncPoll()
+    created() {
+      this.loadUser();
+      this.loadAccounts();
+      this.doSearch('', 0);
+      this.startSyncPoll();
 
-      // Handle browser back/forward.
-      var self = this
-      window.addEventListener('hashchange', function () {
-        self.handleRoute()
-      })
-      this.handleRoute()
+      window.addEventListener('hashchange', () => this.handleRoute());
+      this.handleRoute();
     },
 
     methods: {
       // --- Routing ---
-      handleRoute: function () {
-        var hash = location.hash || '#'
-        if (hash.indexOf('#/email/') === 0) {
-          var rest = hash.slice(8)
-          var qIdx = rest.indexOf('?')
-          var emailPath = decodeURIComponent(qIdx >= 0 ? rest.slice(0, qIdx) : rest)
-          var accountId = null
+      handleRoute() {
+        const hash = location.hash || '#';
+        if (hash.startsWith('#/email/')) {
+          const rest = hash.slice(8);
+          const qIdx = rest.indexOf('?');
+          const emailPath = decodeURIComponent(qIdx >= 0 ? rest.slice(0, qIdx) : rest);
+          let accountId = null;
           if (qIdx >= 0) {
-            var params = new URLSearchParams(rest.slice(qIdx))
-            accountId = params.get('account_id')
+            const params = new URLSearchParams(rest.slice(qIdx));
+            accountId = params.get('account_id');
           }
-          this.showEmailDetail(emailPath, accountId)
+          this.showEmailDetail(emailPath, accountId);
         } else if (hash === '#/accounts') {
-          this.view = 'accounts'
-          this.loadSyncStatus()
+          this.view = 'accounts';
+          this.loadSyncStatus();
         } else if (hash === '#/import') {
-          this.view = 'import'
+          this.view = 'import';
         } else {
-          this.view = 'search'
+          this.view = 'search';
         }
       },
 
-      navigate: function (hash) {
-        if (location.hash !== hash) {
-          location.hash = hash
-        } else {
-          this.handleRoute()
-        }
+      navigate(hash) {
+        if (location.hash !== hash) location.hash = hash;
+        else this.handleRoute();
       },
 
       // --- User ---
-      loadUser: function () {
-        var self = this
-        $.getJSON('/api/me').done(function (data) {
-          self.user = data
-        }).fail(function () {
-          window.location.href = '/login'
-        })
+      async loadUser() {
+        try {
+          const r = await fetch('/api/me');
+          if (!r.ok) throw new Error();
+          this.user = await r.json();
+        } catch {
+          window.location.href = '/login';
+        }
       },
 
-      logout: function () {
-        $.post('/logout').always(function () {
-          window.location.href = '/login'
-        })
+      async logout() {
+        try {
+          await fetch('/logout', { method: 'POST' });
+        } finally {
+          window.location.href = '/login';
+        }
       },
 
       // --- Accounts ---
-      loadAccounts: function () {
-        var self = this
-        $.getJSON('/api/accounts').done(function (data) {
-          self.accounts = data || []
-        })
+      async loadAccounts() {
+        try {
+          const r = await fetch('/api/accounts');
+          this.accounts = r.ok ? (await r.json()) || [] : [];
+        } catch {
+          this.accounts = [];
+        }
       },
 
-      openAddAccount: function () {
-        this.editingAccount = null
+      openAddAccount() {
+        this.editingAccount = null;
         this.newAccount = {
           type: 'IMAP',
           email: '',
@@ -178,416 +169,385 @@
           ssl: true,
           folders: 'all',
           sync: { interval: '5m', enabled: true }
-        }
-        this.showAddAccount = true
+        };
+        this.showAddAccount = true;
       },
 
-      openEditAccount: function (acct) {
-        this.editingAccount = acct.id
-        this.newAccount = JSON.parse(JSON.stringify(acct))
-        this.showAddAccount = true
+      openEditAccount(acct) {
+        this.editingAccount = acct.id;
+        this.newAccount = JSON.parse(JSON.stringify(acct));
+        this.showAddAccount = true;
       },
 
-      saveAccount: function () {
-        var self = this
-        if (this.editingAccount) {
-          $.ajax({
-            url: '/api/accounts/' + this.editingAccount,
-            type: 'PUT',
-            contentType: 'application/json',
-            data: JSON.stringify(this.newAccount)
-          }).done(function () {
-            self.showAddAccount = false
-            self.loadAccounts()
-            self.showToast('Account updated', 'success')
-          }).fail(function () {
-            self.showToast('Failed to update account', 'error')
-          })
-        } else {
-          $.ajax({
-            url: '/api/accounts',
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(this.newAccount)
-          }).done(function () {
-            self.showAddAccount = false
-            self.loadAccounts()
-            self.showToast('Account added', 'success')
-          }).fail(function () {
-            self.showToast('Failed to add account', 'error')
-          })
+      async saveAccount() {
+        const url = this.editingAccount ? `/api/accounts/${this.editingAccount}` : '/api/accounts';
+        const method = this.editingAccount ? 'PUT' : 'POST';
+        try {
+          const r = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this.newAccount)
+          });
+          if (!r.ok) throw new Error();
+          this.showAddAccount = false;
+          this.loadAccounts();
+          this.showToast(this.editingAccount ? 'Account updated' : 'Account added', 'success');
+        } catch {
+          this.showToast(this.editingAccount ? 'Failed to update account' : 'Failed to add account', 'error');
         }
       },
 
-      deleteAccount: function (acct) {
-        if (!confirm('Delete account ' + acct.email + '? Downloaded emails will NOT be removed.')) return
-        var self = this
-        $.ajax({
-          url: '/api/accounts/' + acct.id,
-          type: 'DELETE'
-        }).done(function () {
-          self.loadAccounts()
-          self.showToast('Account deleted', 'success')
-        })
+      async deleteAccount(acct) {
+        if (!confirm(`Delete account ${acct.email}? Downloaded emails will NOT be removed.`)) return;
+        try {
+          const r = await fetch(`/api/accounts/${acct.id}`, { method: 'DELETE' });
+          if (!r.ok) throw new Error();
+          this.loadAccounts();
+          this.showToast('Account deleted', 'success');
+        } catch {
+          this.showToast('Failed to delete account', 'error');
+        }
       },
 
-      updatePortForType: function () {
-        var defaults = { IMAP: 993, POP3: 995, GMAIL_API: 0 }
-        this.newAccount.port = defaults[this.newAccount.type] || 993
+      updatePortForType() {
+        const defaults = { IMAP: 993, POP3: 995, GMAIL_API: 0 };
+        this.newAccount.port = defaults[this.newAccount.type] || 993;
       },
 
-      accountTypeBadge: function (type) {
-        return 'badge badge-' + type.toLowerCase().replace('_', '')
+      accountTypeBadge(type) {
+        return `badge badge-${type.toLowerCase().replace('_', '')}`;
       },
 
-      accountIcon: function (type) {
-        var icons = { IMAP: '\u{1F4E8}', POP3: '\u{1F4EC}', GMAIL_API: '\u{1F4E7}', PST: '\u{1F4C2}' }
-        return icons[type] || '\u{1F4E7}'
+      accountIcon(type) {
+        const icons = { IMAP: '\u{1F4E8}', POP3: '\u{1F4EC}', GMAIL_API: '\u{1F4E7}', PST: '\u{1F4C2}' };
+        return icons[type] ?? '\u{1F4E7}';
       },
 
       // --- Search ---
-      onSearchInput: function () {
-        var self = this
-        clearTimeout(this.debounceTimer)
-        this.currentPage = 0
-        this.debounceTimer = setTimeout(function () {
-          self.doSearch(self.searchQuery, 0)
-        }, 200)
+      onSearchInput() {
+        clearTimeout(this.debounceTimer);
+        this.currentPage = 0;
+        this.debounceTimer = setTimeout(() => this.doSearch(this.searchQuery, 0), 200);
       },
 
-      doSearch: function (query, offset) {
-        var self = this
-        var url = '/api/search?limit=' + this.pageSize + '&offset=' + (offset || 0)
-        url += '&q=' + encodeURIComponent(query || '')
-        var ids = this.enabledSearchAccountIds()
-        if (ids.length > 0 && ids.length < this.accounts.length) {
-          url += '&account_ids=' + encodeURIComponent(ids.join(','))
+      async doSearch(query, offset) {
+        let url = `/api/search?limit=${this.pageSize}&offset=${offset || 0}&q=${encodeURIComponent(query || '')}`;
+        const ids = this.enabledSearchAccountIds();
+        if (ids.length > 0 && ids.length < this.accounts.length) url += `&account_ids=${encodeURIComponent(ids.join(','))}`;
+        if (this.searchMode === 'similarity') url += '&mode=similarity';
+
+        try {
+          const r = await fetch(url);
+          const data = r.ok ? await r.json() : { total: 0, hits: [] };
+          this.searchResults = { ...data, hits: data.hits || [] };
+        } catch {
+          this.searchResults = { total: 0, hits: [], query };
         }
-        if (this.searchMode === 'similarity') url += '&mode=similarity'
-
-        $.getJSON(url).done(function (data) {
-          self.searchResults = data
-          self.searchResults.hits = data.hits || []
-        }).fail(function () {
-          self.searchResults = { total: 0, hits: [], query: query }
-        })
       },
 
-      goToPage: function (page) {
-        this.currentPage = page
-        this.doSearch(this.searchQuery, page * this.pageSize)
-        window.scrollTo({ top: 0, behavior: 'smooth' })
+      goToPage(page) {
+        this.currentPage = page;
+        this.doSearch(this.searchQuery, page * this.pageSize);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
       },
 
-      setSearchMode: function (mode) {
-        this.searchMode = mode
-        this.currentPage = 0
-        this.doSearch(this.searchQuery, 0)
+      setSearchMode(mode) {
+        this.searchMode = mode;
+        this.currentPage = 0;
+        this.doSearch(this.searchQuery, 0);
       },
 
-      isSearchAccountEnabled: function (acctId) {
-        return this.searchAccountMask[acctId] !== false
+      isSearchAccountEnabled(acctId) {
+        return this.searchAccountMask[acctId] !== false;
       },
 
-      toggleSearchAccount: function (acctId) {
-        this.searchAccountMask = Object.assign({}, this.searchAccountMask, { [acctId]: !this.isSearchAccountEnabled(acctId) })
-        this.currentPage = 0
-        this.doSearch(this.searchQuery, 0)
+      toggleSearchAccount(acctId) {
+        this.searchAccountMask = { ...this.searchAccountMask, [acctId]: !this.isSearchAccountEnabled(acctId) };
+        this.currentPage = 0;
+        this.doSearch(this.searchQuery, 0);
       },
 
-      enabledSearchAccountIds: function () {
-        var self = this
-        return this.accounts.filter(function (a) { return self.isSearchAccountEnabled(a.id) }).map(function (a) { return a.id })
+      enabledSearchAccountIds() {
+        return this.accounts.filter((a) => this.isSearchAccountEnabled(a.id)).map((a) => a.id);
       },
 
-      emailDetailHref: function (hit) {
-        var h = '#/email/' + encodeURIComponent(hit.path)
-        if (hit.account_id) h += '?account_id=' + encodeURIComponent(hit.account_id)
-        return h
+      emailDetailHref(hit) {
+        let h = `#/email/${encodeURIComponent(hit.path)}`;
+        if (hit.account_id) h += `?account_id=${encodeURIComponent(hit.account_id)}`;
+        return h;
       },
 
-      highlightText: function (text, query) {
-        if (!query || !text) return this.escapeHtml(text || '')
-        var escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        var re = new RegExp('(' + escaped + ')', 'gi')
-        return this.escapeHtml(text).replace(re, '<mark>$1</mark>')
+      highlightText(text, query) {
+        if (!query || !text) return this.escapeHtml(text || '');
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(`(${escaped})`, 'gi');
+        return this.escapeHtml(text).replace(re, '<mark>$1</mark>');
       },
 
-      formatDate: function (dateStr) {
-        if (!dateStr) return ''
-        var d = new Date(dateStr)
-        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) +
-          ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      formatDate(dateStr) {
+        if (!dateStr) return '';
+        const d = new Date(dateStr);
+        return `${d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })} ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`;
       },
 
       // --- Email Detail ---
-      showEmailDetail: function (path, accountId) {
-        var self = this
-        this.view = 'detail'
-        this.loading = true
-        this.selectedEmail = null
-        this.detailAccountId = accountId || null
+      async showEmailDetail(path, accountId) {
+        this.view = 'detail';
+        this.loading = true;
+        this.selectedEmail = null;
+        this.detailAccountId = accountId ?? null;
 
-        var url = '/api/email?path=' + encodeURIComponent(path)
-        if (accountId) url += '&account_id=' + encodeURIComponent(accountId)
-        $.getJSON(url).done(function (data) {
-          self.selectedEmail = data
-          self.loading = false
-          // Set iframe content after Vue renders.
-          self.$nextTick(function () {
-            var iframe = document.getElementById('email-iframe')
+        let url = `/api/email?path=${encodeURIComponent(path)}`;
+        if (accountId) url += `&account_id=${encodeURIComponent(accountId)}`;
+
+        try {
+          const r = await fetch(url);
+          if (!r.ok) throw new Error();
+          const data = await r.json();
+          this.selectedEmail = data;
+          this.loading = false;
+          this.$nextTick(() => {
+            const iframe = document.getElementById('email-iframe');
             if (iframe && data.html_body) {
-              iframe.srcdoc = data.html_body
-              iframe.addEventListener('load', function () {
+              iframe.srcdoc = data.html_body;
+              iframe.addEventListener('load', () => {
                 try {
-                  var h = iframe.contentDocument.documentElement.scrollHeight
-                  iframe.style.height = Math.max(h + 20, 200) + 'px'
+                  const h = iframe.contentDocument.documentElement.scrollHeight;
+                  iframe.style.height = `${Math.max(h + 20, 200)}px`;
                 } catch (e) { /* cross-origin */ }
-              })
+              });
             }
-          })
-        }).fail(function () {
-          self.loading = false
-          self.showToast('Failed to load email', 'error')
-        })
+          });
+        } catch {
+          this.loading = false;
+          this.showToast('Failed to load email', 'error');
+        }
       },
 
-      goBack: function () {
-        history.back()
+      goBack() {
+        history.back();
       },
 
-      emailDownloadUrl: function () {
-        if (!this.selectedEmail || !this.selectedEmail.path) return '#'
-        var url = '/api/email/download?path=' + encodeURIComponent(this.selectedEmail.path)
-        if (this.detailAccountId) url += '&account_id=' + encodeURIComponent(this.detailAccountId)
-        return url
+      emailDownloadUrl() {
+        if (!this.selectedEmail?.path) return '#';
+        let url = `/api/email/download?path=${encodeURIComponent(this.selectedEmail.path)}`;
+        if (this.detailAccountId) url += `&account_id=${encodeURIComponent(this.detailAccountId)}`;
+        return url;
       },
 
-      attachmentDownloadUrl: function (index) {
-        if (!this.selectedEmail || !this.selectedEmail.path) return '#'
-        var url = '/api/email/attachment?path=' + encodeURIComponent(this.selectedEmail.path) + '&index=' + index
-        if (this.detailAccountId) url += '&account_id=' + encodeURIComponent(this.detailAccountId)
-        return url
+      attachmentDownloadUrl(index) {
+        if (!this.selectedEmail?.path) return '#';
+        let url = `/api/email/attachment?path=${encodeURIComponent(this.selectedEmail.path)}&index=${index}`;
+        if (this.detailAccountId) url += `&account_id=${encodeURIComponent(this.detailAccountId)}`;
+        return url;
       },
 
       // --- Sync ---
-      fetchAndApplySyncStatus: function (onApplied) {
-        var self = this
-        $.getJSON('/api/sync/status').done(function (data) {
-          var list = data || []
-          self.syncStatuses = list
-          var m = {}
-          for (var i = 0; i < list.length; i++) {
-            m[list[i].id] = list[i]
-          }
-          self.syncStatusMap = m
-          for (var j = 0; j < list.length; j++) {
-            var s = list[j]
+      async fetchAndApplySyncStatus(onApplied) {
+        try {
+          const r = await fetch('/api/sync/status');
+          const list = r.ok ? (await r.json()) || [] : [];
+          this.syncStatuses = list;
+          this.syncStatusMap = Object.fromEntries(list.map((s) => [s.id, s]));
+
+          list.forEach((s) => {
             if (s.last_error && !s.syncing) {
-              var key = 'sync_error_' + s.id
-              if (!self._shownErrors) self._shownErrors = {}
-              if (!self._shownErrors[key]) {
-                self._shownErrors[key] = true
-                self.showToast(s.name + ': ' + s.last_error, 'error')
+              const key = `sync_error_${s.id}`;
+              this._shownErrors ??= {};
+              if (!this._shownErrors[key]) {
+                this._shownErrors[key] = true;
+                this.showToast(`${s.name}: ${s.last_error}`, 'error');
               }
-            } else {
-              if (self._shownErrors) delete self._shownErrors['sync_error_' + s.id]
-            }
-          }
-          if (typeof onApplied === 'function') onApplied(list)
-        })
+            } else if (this._shownErrors) delete this._shownErrors[`sync_error_${s.id}`];
+          });
+          onApplied?.(list);
+        } catch {
+          this.syncStatuses = [];
+        }
       },
 
-      loadSyncStatus: function () {
-        this.fetchAndApplySyncStatus()
+      loadSyncStatus() {
+        this.fetchAndApplySyncStatus();
       },
 
-      triggerSync: function (accountID) {
-        var self = this
-        var body = accountID ? { account_id: accountID } : {}
-        $.ajax({
-          url: '/api/sync',
-          type: 'POST',
-          contentType: 'application/json',
-          data: JSON.stringify(body)
-        }).done(function () {
-          self.showToast('Sync started', 'success')
-          self.pollSyncStatus()
-        }).fail(function (xhr) {
-          if (xhr.status === 409) {
-            self.showToast('Sync already running', 'warning')
+      async triggerSync(accountID) {
+        try {
+          const r = await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(accountID ? { account_id: accountID } : {})
+          });
+          if (r.status === 409) {
+            this.showToast('Sync already running', 'warning');
+          } else if (!r.ok) {
+            throw new Error();
           } else {
-            self.showToast('Sync failed', 'error')
+            this.showToast('Sync started', 'success');
+            this.pollSyncStatus();
           }
-        })
+        } catch {
+          this.showToast('Sync failed', 'error');
+        }
       },
 
-      stopSync: function (accountID) {
-        var self = this
-        $.ajax({
-          url: '/api/sync/stop',
-          type: 'POST',
-          contentType: 'application/json',
-          data: JSON.stringify({ account_id: accountID })
-        }).done(function () {
-          self.showToast('Sync stopped', 'warning')
-          self.refreshSyncStatus()
-        }).fail(function () {
-          self.showToast('Failed to stop sync', 'error')
-        })
+      async stopSync(accountID) {
+        try {
+          const r = await fetch('/api/sync/stop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_id: accountID })
+          });
+          if (!r.ok) throw new Error();
+          this.showToast('Sync stopped', 'warning');
+          this.refreshSyncStatus();
+        } catch {
+          this.showToast('Failed to stop sync', 'error');
+        }
       },
 
-      accountSyncStatus: function (accountID) {
-        return this.syncStatusMap[accountID] || {}
+      accountSyncStatus(accountID) {
+        return this.syncStatusMap[accountID] ?? {};
       },
 
-      startSyncPoll: function () {
-        var self = this
-        this.refreshSyncStatus()
-        this.accountPollTimer = setInterval(function () {
-          self.refreshSyncStatus()
-        }, 3000)
+      startSyncPoll() {
+        this.refreshSyncStatus();
+        this.accountPollTimer = setInterval(() => this.refreshSyncStatus(), 3000);
       },
 
-      refreshSyncStatus: function () {
-        this.fetchAndApplySyncStatus()
+      refreshSyncStatus() {
+        this.fetchAndApplySyncStatus();
       },
 
-      pollSyncStatus: function () {
-        var self = this
-        var poll = setInterval(function () {
-          self.fetchAndApplySyncStatus(function (list) {
-            var anySyncing = list.some(function (s) { return s.syncing })
-            if (!anySyncing) {
-              clearInterval(poll)
-              self.showToast('Sync complete', 'success')
+      pollSyncStatus() {
+        const poll = setInterval(() => {
+          this.fetchAndApplySyncStatus((list) => {
+            if (!list.some((s) => s.syncing)) {
+              clearInterval(poll);
+              this.showToast('Sync complete', 'success');
             }
-          })
-        }, 2000)
+          });
+        }, 2000);
       },
 
       // --- Toasts ---
-      showToast: function (message, type) {
-        var toast = { id: Date.now(), message: message, type: type || 'success' }
-        this.toasts.push(toast)
-        var self = this
-        setTimeout(function () {
-          self.toasts = self.toasts.filter(function (t) { return t.id !== toast.id })
-        }, 4000)
+      showToast(message, type = 'success') {
+        const toast = { id: Date.now(), message, type };
+        this.toasts.push(toast);
+        setTimeout(() => {
+          this.toasts = this.toasts.filter((t) => t.id !== toast.id);
+        }, 4000);
       },
 
       // --- Helpers ---
-      escapeHtml: function (s) {
-        if (!s) return ''
-        var div = document.createElement('div')
-        div.textContent = s
-        return div.innerHTML
+      escapeHtml(s) {
+        if (!s) return '';
+        const div = document.createElement('div');
+        div.textContent = s;
+        return div.innerHTML;
       },
 
-      formatSize: function (bytes) {
-        if (!bytes) return ''
-        if (bytes < 1024) return bytes + ' B'
-        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-        return (bytes / 1048576).toFixed(1) + ' MB'
+      formatSize(bytes) {
+        if (!bytes) return '';
+        if (bytes < 1024) return `${bytes} B`;
+        if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+        return `${(bytes / 1048576).toFixed(1)} MB`;
       },
 
       // --- PST/OST Import ---
-      onPSTFileSelected: function (e) {
-        this.importFile = e.target.files[0] || null
+      onPSTFileSelected(e) {
+        this.importFile = e.target.files[0] ?? null;
         if (this.importFile && !this.importTitle) {
-          this.importTitle = this.importFile.name.replace(/\.(pst|ost)$/i, '')
+          this.importTitle = this.importFile.name.replace(/\.(pst|ost)$/i, '');
         }
       },
 
-      startPSTImport: function () {
-        if (!this.importFile) return
-        var self = this
-        this.importRunning = true
-        this.importJob = { phase: 'uploading', current: 0, total: 0 }
+      startPSTImport() {
+        if (!this.importFile) return;
+        this.importRunning = true;
+        this.importJob = { phase: 'uploading', current: 0, total: 0 };
 
-        var formData = new FormData()
-        formData.append('file', this.importFile)
-        formData.append('title', this.importTitle || this.importFile.name)
+        const formData = new FormData();
+        formData.append('file', this.importFile);
+        formData.append('title', this.importTitle || this.importFile.name);
 
-        $.ajax({
-          url: '/api/import/pst',
-          type: 'POST',
-          data: formData,
-          processData: false,
-          contentType: false,
-          xhr: function () {
-            var xhr = new XMLHttpRequest()
-            xhr.upload.addEventListener('progress', function (e) {
-              if (e.lengthComputable) {
-                self.importJob = {
-                  phase: 'uploading',
-                  current: Math.round(e.loaded / (1024 * 1024)),
-                  total: Math.round(e.total / (1024 * 1024))
-                }
-              }
-            })
-            return xhr
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            this.importJob = {
+              phase: 'uploading',
+              current: Math.round(e.loaded / (1024 * 1024)),
+              total: Math.round(e.total / (1024 * 1024))
+            };
           }
-        }).done(function (data) {
-          self.importJob = { id: data.job_id, phase: 'extracting', current: 0, total: 0 }
-          self.pollImportStatus(data.job_id)
-          self.showToast('Upload complete, extracting messages...', 'success')
-        }).fail(function (xhr) {
-          self.importRunning = false
-          var msg = 'Upload failed'
-          try { msg = JSON.parse(xhr.responseText).error } catch (e) {}
-          self.importJob = { phase: 'error', error: msg }
-          self.showToast(msg, 'error')
-        })
+        });
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            const data = JSON.parse(xhr.responseText);
+            this.importJob = { id: data.job_id, phase: 'extracting', current: 0, total: 0 };
+            this.pollImportStatus(data.job_id);
+            this.showToast('Upload complete, extracting messages...', 'success');
+          } else {
+            this.importRunning = false;
+            let msg = 'Upload failed';
+            try { msg = JSON.parse(xhr.responseText).error; } catch (e) {}
+            this.importJob = { phase: 'error', error: msg };
+            this.showToast(msg, 'error');
+          }
+        });
+        xhr.addEventListener('error', () => {
+          this.importRunning = false;
+          this.importJob = { phase: 'error', error: 'Upload failed' };
+          this.showToast('Upload failed', 'error');
+        });
+        xhr.open('POST', '/api/import/pst');
+        xhr.send(formData);
       },
 
-      pollImportStatus: function (jobID) {
-        var self = this
-        if (this.importPollTimer) clearInterval(this.importPollTimer)
-        this.importPollTimer = setInterval(function () {
-          $.getJSON('/api/import/status/' + jobID).done(function (data) {
-            self.importJob = data
+      pollImportStatus(jobID) {
+        if (this.importPollTimer) clearInterval(this.importPollTimer);
+        this.importPollTimer = setInterval(async () => {
+          try {
+            const r = await fetch(`/api/import/status/${jobID}`);
+            if (!r.ok) return;
+            const data = await r.json();
+            this.importJob = data;
             if (data.phase === 'done') {
-              clearInterval(self.importPollTimer)
-              self.importPollTimer = null
-              self.importRunning = false
-              self.importHistory.unshift(data)
-              self.loadAccounts()
-              self.showToast('Import complete: ' + data.current + ' messages', 'success')
+              clearInterval(this.importPollTimer);
+              this.importPollTimer = null;
+              this.importRunning = false;
+              this.importHistory.unshift(data);
+              this.loadAccounts();
+              this.showToast(`Import complete: ${data.current} messages`, 'success');
             } else if (data.phase === 'error') {
-              clearInterval(self.importPollTimer)
-              self.importPollTimer = null
-              self.importRunning = false
-              self.importHistory.unshift(data)
-              self.showToast('Import failed: ' + data.error, 'error')
+              clearInterval(this.importPollTimer);
+              this.importPollTimer = null;
+              this.importRunning = false;
+              this.importHistory.unshift(data);
+              this.showToast(`Import failed: ${data.error}`, 'error');
             }
-          })
-        }, 1500)
+          } catch {
+            // ignore poll errors
+          }
+        }, 1500);
       },
 
-      pagerRange: function () {
-        var pages = []
-        var total = this.totalPages
-        var current = this.currentPage
-        var start = Math.max(0, current - 2)
-        var end = Math.min(total - 1, current + 2)
+      pagerRange() {
+        const total = this.totalPages;
+        const current = this.currentPage;
+        const start = Math.max(0, current - 2);
+        const end = Math.min(total - 1, current + 2);
+        const pages = [];
 
-        if (start > 0) pages.push({ num: 0, label: '1' })
-        if (start > 1) pages.push({ num: -1, label: '...' })
+        if (start > 0) pages.push({ num: 0, label: '1' });
+        if (start > 1) pages.push({ num: -1, label: '...' });
+        for (let i = start; i <= end; i++) pages.push({ num: i, label: String(i + 1) });
+        if (end < total - 2) pages.push({ num: -1, label: '...' });
+        if (end < total - 1) pages.push({ num: total - 1, label: String(total) });
 
-        for (var i = start; i <= end; i++) {
-          pages.push({ num: i, label: String(i + 1) })
-        }
-
-        if (end < total - 2) pages.push({ num: -1, label: '...' })
-        if (end < total - 1) pages.push({ num: total - 1, label: String(total) })
-
-        return pages
+        return pages;
       }
     }
-  }
+  };
 
-  // Mount Vue app.
-  var app = Vue.createApp(App)
-  app.mount('#app')
+  Vue.createApp(App).mount('#app');
 })();
