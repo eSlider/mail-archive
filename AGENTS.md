@@ -46,6 +46,7 @@ mails/
 - **No CDN** — Vue.js served locally, native fetch for HTTP
 - **Go backend** — single binary, Chi router
 - **NEVER delete emails** from server — sync is read-only
+- **Responsive UI** — bottom nav on mobile, infinite scroll, swipe prev/next in email detail
 
 ## Package Dependencies
 
@@ -61,7 +62,7 @@ cmd → internal/web → internal/sync → internal/model
 
 - **Do NOT add yourself as co-author**
 - **NEVER REMOVE EMAILS** from server
-- **Go 1.25+**, strict typing
+- **Go 1.24+**, strict typing
 - **No classes unless necessary** — prefer pure functions
 - **Minimal dependencies** — stdlib first
 - **Comments in English only**
@@ -69,7 +70,7 @@ cmd → internal/web → internal/sync → internal/model
 - All user data in `users/{uuid}/`
 - Keep sync modules independent — each handles one protocol
 - Log everything at INFO level, errors with full tracebacks
-- Frontend: Vue.js 3, plain JavaScript (no TypeScript), native fetch for API calls
+- Frontend: Vue.js 3, plain JavaScript (no TypeScript), native fetch; mobile: bottom nav, infinite scroll, swipe between emails
 - Use snake_case import aliases for disambiguation
 
 ## Next Steps (Priority Order)

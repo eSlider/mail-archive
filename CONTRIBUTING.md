@@ -194,6 +194,12 @@ Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsg
 - **Native fetch** for API calls — use async/await, handle `Response.ok` and errors
 - Use Vue's `$nextTick` for post-render DOM access
 
+### Mobile / Responsive
+
+- **Bottom nav** (&lt; 768px): Search, Accounts, Import tabs; hidden on email detail view
+- **Infinite scroll**: Intersection Observer + "Load more" button; appends next page of results
+- **Email detail**: Prev/next buttons, swipe left (prev) / right (next), position count ("3 of 50"), back returns to search list
+
 ### CSS Guidelines
 
 1. Use CSS custom properties (variables) for theming
@@ -201,6 +207,7 @@ Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsg
 3. Avoid `!important` — add comments if unavoidable
 4. Mobile-first responsive design with `@media` breakpoints
 5. BEM-like naming: `.email-card`, `.email-subject`, `.email-meta-row`
+6. Mobile: touch targets ≥ 44px, `env(safe-area-inset-*)` for notched devices
 
 ### Accessibility
 

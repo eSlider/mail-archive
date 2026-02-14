@@ -19,6 +19,7 @@ Multi-user email archival system with search. Syncs emails from IMAP, POP3, and 
 - **UUIDv7 IDs** — time-ordered identifiers for all entities
 - **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
 - **Per-user isolation** — all data under `users/{uuid}/`
+- **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
 
 ## Quick Start
 
@@ -102,9 +103,7 @@ users/
 ## Architecture
 
 ```
-cmd/
-  mails/           → Entry point, CLI (serve, fix-dates, version)
-  mail-search/     → Standalone search CLI (optional, EMAILS_DIR + Qdrant/Ollama)
+cmd/mails/         → Entry point, CLI (serve, fix-dates, version)
 internal/
   auth/            → OAuth2 (GitHub, Google, Facebook), sessions
   user/            → User storage (users/{uuid}/)
@@ -152,7 +151,7 @@ docker compose watch
 | Component | Technology |
 |-----------|-----------|
 | Backend | Go 1.24+ |
-| Frontend | jQuery 3.7, Vue.js 3.5 (no build step, no CDN) |
+| Frontend | Vue.js 3.5, native fetch (no build step, no CDN) |
 | Search index | DuckDB (in-memory) + Parquet (persistence) |
 | Vector search | Qdrant + Ollama embeddings |
 | Sync state | SQLite (per-user) |
@@ -162,7 +161,13 @@ docker compose watch
 
 ## Frontend
 
-The frontend uses **Vue.js 3** and **jQuery** with zero build tooling -- no webpack, no Vite, no TypeScript. All vendor libraries are committed locally under `web/static/js/vendor/` (no CDN dependency).
+The frontend uses **Vue.js 3** and **native fetch** with zero build tooling — no webpack, no Vite, no TypeScript. All vendor libraries are committed locally under `web/static/js/vendor/` (no CDN dependency).
+
+### Mobile features
+
+- **Bottom navigation** — Search, Accounts, Import tabs (viewport &lt; 768px)
+- **Infinite scroll** — "Load more" button and auto-load when scrolling to the bottom
+- **Email detail** — Prev/next buttons, swipe left/right, position count (e.g. "3 of 50"), back to search results
 
 ### Template Loading
 
@@ -190,13 +195,12 @@ This keeps the template editable as a proper `.vue` file (with IDE syntax highli
 
 ```
 web/static/
-  css/app.css                        # Application styles (dark theme, CSS vars)
+  css/app.css                        # Application styles (dark theme, responsive)
   js/
     vendor/
-      jquery-3.7.1.min.js            # jQuery (local copy)
       vue-3.5.13.global.prod.js      # Vue.js (local copy)
     app/
-      main.js                        # App logic (data, methods, computed)
+      main.js                        # App logic (native fetch, ES6+)
       main.template.vue              # Vue template (HTML with directives)
 ```
 

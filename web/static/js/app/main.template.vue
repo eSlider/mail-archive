@@ -1,8 +1,8 @@
-<div>
+<div class="app-root" :class="{ 'view-detail': view === 'detail' }">
   <!-- Header -->
   <header class="app-header">
     <a class="logo" href="#" @click.prevent="navigate('#')">Mail Archive</a>
-    <nav class="header-nav">
+    <nav class="header-nav header-nav-desktop">
       <a href="#" :class="{active: view === 'search'}" @click.prevent="navigate('#')">Search</a>
       <a href="#/accounts" :class="{active: view === 'accounts'}" @click.prevent="navigate('#/accounts')">Accounts</a>
       <a href="#/import" :class="{active: view === 'import'}" @click.prevent="navigate('#/import')">Import</a>
@@ -49,13 +49,18 @@
           <span>{{ formatDate(hit.date) }}</span>
         </div>
       </a>
-      <div v-if="totalPages > 1" class="pager">
-        <button :disabled="currentPage === 0" @click="goToPage(currentPage - 1)">&lsaquo; Prev</button>
-        <template v-for="p in pagerRange()" :key="p.label">
-          <button v-if="p.num >= 0" :class="{active: p.num === currentPage}" @click="goToPage(p.num)">{{ p.label }}</button>
-          <span v-else style="color:var(--text-dim);font-size:0.82rem">{{ p.label }}</span>
-        </template>
-        <button :disabled="currentPage >= totalPages - 1" @click="goToPage(currentPage + 1)">Next &rsaquo;</button>
+      <!-- Mobile: infinite scroll sentinel + Load more button (visible tap target) -->
+      <div v-if="isMobile && totalPages > 1 && currentPage < totalPages - 1" ref="loadMoreSentinel" class="load-more-sentinel">
+        <button class="btn btn-sm load-more-btn" @click="loadMore" :disabled="loadingMore">
+          <span v-if="loadingMore" class="spinner spinner-sm"></span>
+          <span>{{ loadingMore ? 'Loading...' : 'Load more' }}</span>
+        </button>
+      </div>
+      <!-- Desktop: pager -->
+      <div v-if="!isMobile && totalPages > 1" class="pager">
+        <button class="pager-btn pager-prev" :disabled="currentPage === 0" @click="goToPage(currentPage - 1)">&lsaquo; Prev</button>
+        <span class="pager-info">{{ currentPage + 1 }} / {{ totalPages }}</span>
+        <button class="pager-btn pager-next" :disabled="currentPage >= totalPages - 1" @click="goToPage(currentPage + 1)">Next &rsaquo;</button>
       </div>
     </div>
     <div v-else-if="searchResults" class="empty-state">
@@ -166,15 +171,25 @@
   </div>
 
   <!-- Email Detail View -->
-  <div v-if="view === 'detail'" class="container">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">
-      <a class="back-link" @click.prevent="goBack">
-        <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
-        Back to results
-      </a>
-      <a v-if="selectedEmail" :href="emailDownloadUrl()" class="btn btn-sm" download style="display:inline-flex;align-items:center;gap:0.4rem">
-        <svg width="14" height="14" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 16v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2"/></svg>
-        Download .eml
+  <div v-if="view === 'detail'" class="container detail-container detail-swipe-area"
+    @touchstart="onDetailTouchStart"
+    @touchend="onDetailTouchEnd">
+    <div class="detail-nav-bar">
+      <div class="detail-nav-group">
+        <button v-if="detailPrevHit" class="btn-icon" @click="goToEmail(detailPrevHit)" title="Previous email" aria-label="Previous email">
+          <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+        </button>
+        <button class="btn-icon btn-back" @click="goBack" title="Back to results" aria-label="Back to results">
+          <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/></svg>
+        </button>
+        <button v-if="detailNextHit" class="btn-icon" @click="goToEmail(detailNextHit)" title="Next" aria-label="Next email">
+          <svg width="20" height="20" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5 15.75 12l-7.5 7.5"/></svg>
+        </button>
+        <span v-if="detailCountDisplay" class="detail-count">{{ detailCountDisplay }}</span>
+      </div>
+      <a v-if="selectedEmail" :href="emailDownloadUrl()" class="btn btn-sm btn-detail-download" download>
+        <svg width="14" height="14" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        Download
       </a>
     </div>
     <div v-if="loading" style="text-align:center;padding:3rem"><span class="spinner" style="width:32px;height:32px;border-width:3px"></span></div>
@@ -259,6 +274,22 @@
       </div>
     </div>
   </div>
+
+  <!-- Mobile bottom navigation -->
+  <nav class="bottom-nav" v-if="user">
+    <a href="#" class="bottom-nav-item" :class="{active: view === 'search'}" @click.prevent="navigate('#')">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.35-4.35"/></svg>
+      <span>Search</span>
+    </a>
+    <a href="#/accounts" class="bottom-nav-item" :class="{active: view === 'accounts'}" @click.prevent="navigate('#/accounts')">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"/></svg>
+      <span>Accounts</span>
+    </a>
+    <a href="#/import" class="bottom-nav-item" :class="{active: view === 'import'}" @click.prevent="navigate('#/import')">
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></svg>
+      <span>Import</span>
+    </a>
+  </nav>
 
   <!-- Toasts -->
   <div class="toast-container">

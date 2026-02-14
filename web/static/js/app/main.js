@@ -50,7 +50,9 @@
         importRunning: false,
         importJob: null,
         importHistory: [],
-        importPollTimer: null
+        importPollTimer: null,
+        loadingMore: false,
+        isMobile: false
       };
     },
 
@@ -98,10 +100,37 @@
           default: pct = 0;
         }
         return pct;
+      },
+
+      detailHitIndex() {
+        if (!this.selectedEmail || !this.searchResults?.hits?.length) return -1;
+        const idx = this.searchResults.hits.findIndex(
+          (h) => h.path === this.selectedEmail.path && (h.account_id || null) === (this.detailAccountId || null)
+        );
+        return idx;
+      },
+
+      detailPrevHit() {
+        const idx = this.detailHitIndex;
+        return idx > 0 ? this.searchResults.hits[idx - 1] : null;
+      },
+
+      detailNextHit() {
+        const idx = this.detailHitIndex;
+        const hits = this.searchResults?.hits ?? [];
+        return idx >= 0 && idx < hits.length - 1 ? hits[idx + 1] : null;
+      },
+
+      detailCountDisplay() {
+        const idx = this.detailHitIndex;
+        const total = this.searchResults?.total ?? this.searchResults?.hits?.length ?? 0;
+        if (idx < 0 || total === 0) return '';
+        return `${idx + 1} of ${total}`;
       }
     },
 
     created() {
+      this.isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
       this.loadUser();
       this.loadAccounts();
       this.doSearch('', 0);
@@ -109,6 +138,20 @@
 
       window.addEventListener('hashchange', () => this.handleRoute());
       this.handleRoute();
+    },
+
+    mounted() {
+      this.checkMobile = () => { this.isMobile = window.innerWidth < 768; };
+      window.addEventListener('resize', this.checkMobile);
+    },
+
+    updated() {
+      this.setupLoadMoreObserver();
+    },
+
+    beforeUnmount() {
+      window.removeEventListener('resize', this.checkMobile);
+      this._loadMoreObserver?.disconnect();
     },
 
     methods: {
@@ -236,18 +279,29 @@
         this.debounceTimer = setTimeout(() => this.doSearch(this.searchQuery, 0), 200);
       },
 
-      async doSearch(query, offset) {
-        let url = `/api/search?limit=${this.pageSize}&offset=${offset || 0}&q=${encodeURIComponent(query || '')}`;
+      async doSearch(query, offset, append = false) {
+        const off = offset ?? 0;
+        let url = `/api/search?limit=${this.pageSize}&offset=${off}&q=${encodeURIComponent(query || '')}`;
         const ids = this.enabledSearchAccountIds();
         if (ids.length > 0 && ids.length < this.accounts.length) url += `&account_ids=${encodeURIComponent(ids.join(','))}`;
         if (this.searchMode === 'similarity') url += '&mode=similarity';
 
+        if (append) this.loadingMore = true;
         try {
           const r = await fetch(url);
           const data = r.ok ? await r.json() : { total: 0, hits: [] };
-          this.searchResults = { ...data, hits: data.hits || [] };
+          if (append && this.searchResults?.hits?.length) {
+            this.searchResults = { ...this.searchResults, ...data, hits: [...this.searchResults.hits, ...(data.hits || [])] };
+            this.currentPage = Math.floor(off / this.pageSize);
+          } else {
+            this.searchResults = { ...data, hits: data.hits || [] };
+            this.currentPage = Math.floor(off / this.pageSize);
+            if (!append) this._loadMoreObserverSetup = false;
+          }
         } catch {
-          this.searchResults = { total: 0, hits: [], query };
+          if (!append) this.searchResults = { total: 0, hits: [], query };
+        } finally {
+          if (append) this.loadingMore = false;
         }
       },
 
@@ -255,6 +309,33 @@
         this.currentPage = page;
         this.doSearch(this.searchQuery, page * this.pageSize);
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      },
+
+      loadMore() {
+        if (this.loadingMore || !this.searchResults?.hits?.length) return;
+        if (this.currentPage >= this.totalPages - 1) return;
+        this.doSearch(this.searchQuery, (this.currentPage + 1) * this.pageSize, true);
+      },
+
+      setupLoadMoreObserver() {
+        if (!this.isMobile || this.view !== 'search') return;
+        const sentinel = this.$refs.loadMoreSentinel;
+        if (!sentinel) {
+          this._loadMoreObserverSetup = false;
+          return;
+        }
+        if (this._loadMoreObserverSetup) return;
+        this.$nextTick(() => {
+          const el = this.$refs.loadMoreSentinel;
+          if (!el) return;
+          this._loadMoreObserver?.disconnect();
+          this._loadMoreObserver = new IntersectionObserver(
+            (entries) => { if (entries[0]?.isIntersecting) this.loadMore(); },
+            { rootMargin: '200px', threshold: 0 }
+          );
+          this._loadMoreObserver.observe(el);
+          this._loadMoreObserverSetup = true;
+        });
       },
 
       setSearchMode(mode) {
@@ -331,7 +412,24 @@
       },
 
       goBack() {
-        history.back();
+        this.navigate('#');
+      },
+
+      goToEmail(hit) {
+        this.navigate(this.emailDetailHref(hit));
+      },
+
+      onDetailTouchStart(e) {
+        if (e.changedTouches?.length) this._touchStartX = e.changedTouches[0].clientX;
+      },
+
+      onDetailTouchEnd(e) {
+        if (!e.changedTouches?.length || this._touchStartX == null) return;
+        const dx = e.changedTouches[0].clientX - this._touchStartX;
+        this._touchStartX = null;
+        const threshold = 60;
+        if (dx > threshold && this.detailPrevHit) this.goToEmail(this.detailPrevHit);
+        else if (dx < -threshold && this.detailNextHit) this.goToEmail(this.detailNextHit);
       },
 
       emailDownloadUrl() {
