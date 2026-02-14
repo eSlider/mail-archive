@@ -39,32 +39,43 @@
         <button class="btn btn-sm" :class="{'btn-primary': searchMode === 'similarity'}" @click="setSearchMode('similarity')">Similarity</button>
       </div>
     </div>
-    <div v-if="searchResults && searchResults.hits.length" class="search-results-wrap">
-      <div v-if="searchResults.total > 0" class="search-progress-wrap">
-        <div class="search-progress-bar" :title="searchResults.hits.length + ' / ' + searchResults.total + ' (page ' + (currentPage + 1) + ' of ' + totalPages + ')'">
-          <div class="search-progress-fill" :style="{ height: searchLoadProgress + '%' }"></div>
+    <div v-if="searchResults && searchResults.total > 0" class="search-results-wrap">
+      <div class="search-progress-wrap">
+        <div ref="scrollBarTrack" class="search-progress-bar search-scroll-bar-track" :title="searchResults.hits.length + ' / ' + searchResults.total + ' (page ' + (currentPage + 1) + ' of ' + totalPages + ')'" @click="onScrollBarTrackClick">
+          <div class="search-progress-fill search-scroll-bar-fill" :style="{ height: searchLoadProgress + '%' }"></div>
+          <div class="search-scroll-bar-thumb" :style="scrollBarThumbStyle" @mousedown.prevent="onScrollBarThumbMouseDown" @touchstart.prevent="onScrollBarThumbTouchStart" @click.stop></div>
           <span class="search-progress-label">{{ searchResults.hits.length }} / {{ searchResults.total }}</span>
         </div>
       </div>
-      <a v-for="hit in searchResults.hits" :key="(hit.account_id || '') + '/' + hit.path" class="email-card" :href="emailDetailHref(hit)">
-        <div class="email-subject-row">
-          <span class="email-subject" v-html="highlightText(hit.subject || '(no subject)', searchQuery)"></span>
-          <span v-if="folderFromPath(hit.path)" class="email-folder">{{ folderFromPath(hit.path) }}</span>
+      <div ref="searchResultsList" class="search-results-list">
+      <div v-if="virtualTopHeight > 0" class="virtual-spacer" :style="{ height: virtualTopHeight + 'px' }" aria-hidden="true"></div>
+      <template v-for="item in visibleItems" :key="item.type === 'hit' ? (item.hit.account_id || '') + '/' + item.hit.path : 'ph-' + item.index">
+        <a v-if="item.type === 'hit'" class="email-card" :href="emailDetailHref(item.hit)">
+          <div class="email-subject-row">
+            <span class="email-subject" v-html="highlightText(item.hit.subject || '(no subject)', searchQuery)"></span>
+            <span v-if="folderFromPath(item.hit.path)" class="email-folder">{{ folderFromPath(item.hit.path) }}</span>
+          </div>
+          <div v-if="item.hit.snippet" class="email-snippet" v-html="highlightText(item.hit.snippet, searchQuery)"></div>
+          <div class="email-meta-row">
+            <span>From: {{ item.hit.from }}</span>
+            <span>To: {{ item.hit.to }}</span>
+            <span>{{ formatDate(item.hit.date) }}</span>
+          </div>
+        </a>
+        <div v-else class="email-card email-card-placeholder" aria-hidden="true">
+          <div class="email-card-skeleton"></div>
         </div>
-        <div v-if="hit.snippet" class="email-snippet" v-html="highlightText(hit.snippet, searchQuery)"></div>
-        <div class="email-meta-row">
-          <span>From: {{ hit.from }}</span>
-          <span>To: {{ hit.to }}</span>
-          <span>{{ formatDate(hit.date) }}</span>
-        </div>
-      </a>
-      <!-- Infinite scroll sentinel + Load more button -->
+      </template>
+      <div v-if="virtualBottomHeight > 0" class="virtual-spacer" :style="{ height: virtualBottomHeight + 'px' }" aria-hidden="true"></div>
+      </div>
+      <!-- Infinite scroll sentinel - before spacer so it stays reachable -->
       <div v-if="totalPages > 1 && currentPage < totalPages - 1" ref="loadMoreSentinel" class="load-more-sentinel">
         <button class="btn btn-sm load-more-btn" @click="loadMore" :disabled="loadingMore">
           <span v-if="loadingMore" class="spinner spinner-sm"></span>
           <span>{{ loadingMore ? 'Loading...' : 'Load more' }}</span>
         </button>
       </div>
+      <div v-if="spacerHeight > 0" class="email-card-spacer" :style="{ height: spacerHeight + 'px' }" aria-hidden="true"></div>
     </div>
     <div v-else-if="searchResults" class="empty-state">
       <p>No emails found{{ searchQuery ? ' for "' + searchQuery + '"' : "" }}</p>

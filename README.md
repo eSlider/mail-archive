@@ -20,6 +20,7 @@ Multi-user email archival system with search. Syncs emails from IMAP, POP3, and 
 - **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
 - **Per-user isolation** — all data under `users/{uuid}/`
 - **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
+- **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
 
 ## Quick Start
 
@@ -166,8 +167,14 @@ The frontend uses **Vue.js 3** and **native fetch** with zero build tooling — 
 ### Mobile features
 
 - **Bottom navigation** — Search, Accounts, Import tabs (viewport &lt; 768px)
-- **Infinite scroll** — "Load more" button and auto-load when scrolling to the bottom
+- **Infinite scroll** — "Load more" button and auto-load when scrolling to the bottom (mouse wheel and drag)
 - **Email detail** — Prev/next buttons, swipe left/right, position count (e.g. "3 of 50"), back to search results
+
+### Search results performance
+
+- **Virtual list** — renders only items in the viewport (~40 DOM nodes instead of thousands)
+- **Custom scroll bar** — drag-to-scroll, click track to jump, progress fill shows load state
+- **Hidden native scrollbar** — clean UI; scroll via mouse wheel, touch, or custom bar
 
 ### Template Loading
 

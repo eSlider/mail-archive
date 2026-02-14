@@ -7,6 +7,10 @@
 
   const KB = 1024;
   const MB = KB * KB;
+  const EMAIL_CARD_EST_HEIGHT = 100;
+  const MAX_PLACEHOLDER_CARDS = 50;
+  const MAX_SPACER_HEIGHT = 50000;
+  const VIRTUAL_WINDOW_BUFFER = 5;
 
   const templateResponse = await fetch('/static/js/app/main.template.vue');
   const templateHTML = await templateResponse.text();
@@ -52,7 +56,13 @@
         importHistory: [],
         importPollTimer: null,
         loadingMore: false,
-        isMobile: false
+        isMobile: false,
+        scrollY: 0,
+        scrollBarTrackHeight: 0,
+        scrollBarMaxScroll: 1,
+        scrollBarDragging: false,
+        viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+        listTop: 0
       };
     },
 
@@ -66,6 +76,81 @@
         if (!this.searchResults?.total || this.searchResults.total === 0) return 0;
         const loaded = this.searchResults.hits?.length ?? 0;
         return Math.min(100, (loaded / this.searchResults.total) * 100);
+      },
+
+      displayItems() {
+        if (!this.searchResults?.total) return [];
+        const hits = this.searchResults.hits ?? [];
+        const total = this.searchResults.total;
+        const remaining = total - hits.length;
+        const items = [];
+        for (let i = 0; i < hits.length; i++) items.push({ type: 'hit', hit: hits[i] });
+        const placeholdersToShow = Math.min(remaining, MAX_PLACEHOLDER_CARDS);
+        for (let i = 0; i < placeholdersToShow; i++) items.push({ type: 'placeholder', index: hits.length + i });
+        return items;
+      },
+
+      visibleItems() {
+        const items = this.displayItems;
+        if (items.length === 0) return [];
+        const h = EMAIL_CARD_EST_HEIGHT;
+        const vh = this.viewportHeight || 800;
+        const scrollInList = Math.max(0, this.scrollY - this.listTop);
+        const start = Math.max(0, Math.floor(scrollInList / h) - VIRTUAL_WINDOW_BUFFER);
+        const count = Math.ceil(vh / h) + 2 * VIRTUAL_WINDOW_BUFFER;
+        const end = Math.min(items.length, start + count);
+        return items.slice(start, end);
+      },
+
+      virtualTopHeight() {
+        const items = this.displayItems;
+        if (items.length === 0) return 0;
+        const h = EMAIL_CARD_EST_HEIGHT;
+        const scrollInList = Math.max(0, this.scrollY - this.listTop);
+        const start = Math.max(0, Math.floor(scrollInList / h) - VIRTUAL_WINDOW_BUFFER);
+        const count = Math.ceil((this.viewportHeight || 800) / h) + 2 * VIRTUAL_WINDOW_BUFFER;
+        const end = Math.min(items.length, start + count);
+        const visibleStart = Math.min(start, items.length);
+        return visibleStart * h;
+      },
+
+      virtualBottomHeight() {
+        const items = this.displayItems;
+        if (items.length === 0) return 0;
+        const h = EMAIL_CARD_EST_HEIGHT;
+        const scrollInList = Math.max(0, this.scrollY - this.listTop);
+        const start = Math.max(0, Math.floor(scrollInList / h) - VIRTUAL_WINDOW_BUFFER);
+        const count = Math.ceil((this.viewportHeight || 800) / h) + 2 * VIRTUAL_WINDOW_BUFFER;
+        const end = Math.min(items.length, start + count);
+        return (items.length - end) * h;
+      },
+
+      spacerHeight() {
+        if (!this.searchResults?.total) return 0;
+        const hits = this.searchResults.hits ?? [];
+        const remaining = Math.max(0, this.searchResults.total - hits.length);
+        if (remaining <= MAX_PLACEHOLDER_CARDS) return 0;
+        const raw = (remaining - MAX_PLACEHOLDER_CARDS) * EMAIL_CARD_EST_HEIGHT;
+        return Math.min(raw, MAX_SPACER_HEIGHT);
+      },
+
+      placeholderHeight() {
+        if (!this.searchResults?.total) return 0;
+        const loaded = this.searchResults.hits?.length ?? 0;
+        const remaining = Math.max(0, this.searchResults.total - loaded);
+        return remaining * EMAIL_CARD_EST_HEIGHT;
+      },
+
+      scrollBarThumbStyle() {
+        const trackH = this.scrollBarTrackHeight || 300;
+        const maxScroll = Math.max(1, this.scrollBarMaxScroll);
+        const thumbH = Math.max(24, Math.min(trackH * 0.3, trackH * 0.4));
+        const range = Math.max(0, trackH - thumbH);
+        const pct = range > 0 ? Math.min(1, this.scrollY / maxScroll) : 0;
+        return {
+          height: thumbH + 'px',
+          top: (pct * range) + 'px'
+        };
       },
 
       importPhaseLabel() {
@@ -147,8 +232,17 @@
     },
 
     mounted() {
-      this.checkMobile = () => { this.isMobile = window.innerWidth < 768; };
+      this.checkMobile = () => {
+        this.isMobile = window.innerWidth < 768;
+        this.viewportHeight = window.innerHeight;
+        this.measureScrollBar();
+      };
       window.addEventListener('resize', this.checkMobile);
+      window.addEventListener('scroll', this.onScrollThrottled, { passive: true });
+      this.$nextTick(() => {
+        this.onScroll();
+        this.measureScrollBar();
+      });
     },
 
     updated() {
@@ -157,6 +251,14 @@
 
     beforeUnmount() {
       window.removeEventListener('resize', this.checkMobile);
+      window.removeEventListener('scroll', this.onScrollThrottled);
+      if (this._scrollBarMouseMove) window.removeEventListener('mousemove', this._scrollBarMouseMove);
+      if (this._scrollBarMouseUp) window.removeEventListener('mouseup', this._scrollBarMouseUp);
+      if (this._scrollBarTouchMove) window.removeEventListener('touchmove', this._scrollBarTouchMove);
+      if (this._scrollBarTouchEnd) {
+        window.removeEventListener('touchend', this._scrollBarTouchEnd);
+        window.removeEventListener('touchcancel', this._scrollBarTouchEnd);
+      }
       this._loadMoreObserver?.disconnect();
     },
 
@@ -292,7 +394,13 @@
         if (ids.length > 0 && ids.length < this.accounts.length) url += `&account_ids=${encodeURIComponent(ids.join(','))}`;
         if (this.searchMode === 'similarity') url += '&mode=similarity';
 
-        if (append) this.loadingMore = true;
+        if (append) {
+          this.loadingMore = true;
+        } else {
+          this.searchResults = { total: this.pageSize, hits: [], query };
+          this._lastLoadTime = 0;
+        }
+
         try {
           const r = await fetch(url);
           const data = r.ok ? await r.json() : { total: 0, hits: [] };
@@ -308,11 +416,16 @@
           if (!append) this.searchResults = { total: 0, hits: [], query };
         } finally {
           if (append) this.loadingMore = false;
+          this.$nextTick(() => {
+            this.onScroll();
+            this.measureScrollBar();
+          });
         }
       },
 
       loadMore() {
-        if (this.loadingMore || !this.searchResults?.hits?.length) return;
+        if (this.loadingMore || !this.searchResults) return;
+        if (this.searchResults.hits?.length === 0) return;
         if (this.currentPage >= this.totalPages - 1) return;
         this.doSearch(this.searchQuery, (this.currentPage + 1) * this.pageSize, true);
       },
@@ -329,13 +442,132 @@
           const el = this.$refs.loadMoreSentinel;
           if (!el) return;
           this._loadMoreObserver?.disconnect();
+          const LOAD_COOLDOWN_MS = 800;
           this._loadMoreObserver = new IntersectionObserver(
-            (entries) => { if (entries[0]?.isIntersecting) this.loadMore(); },
+            (entries) => {
+              if (!entries[0]?.isIntersecting) return;
+              const now = Date.now();
+              if (this._lastLoadTime && now - this._lastLoadTime < LOAD_COOLDOWN_MS) return;
+              this._lastLoadTime = now;
+              this.loadMore();
+            },
             { rootMargin: '200px', threshold: 0 }
           );
           this._loadMoreObserver.observe(el);
           this._loadMoreObserverSetup = true;
         });
+      },
+
+      onScroll() {
+        if (this.view !== 'search') return;
+        this.scrollY = window.scrollY ?? window.pageYOffset ?? 0;
+        this.scrollBarMaxScroll = Math.max(1, (document.documentElement.scrollHeight - window.innerHeight));
+        const listEl = this.$refs.searchResultsList;
+        if (listEl) this.listTop = listEl.getBoundingClientRect().top + (window.scrollY ?? 0);
+        this.loadPageAtScrollPosition(this.scrollY);
+      },
+
+      onScrollThrottled() {
+        if (this._scrollRaf) return;
+        this._scrollRaf = requestAnimationFrame(() => {
+          this._scrollRaf = null;
+          this.onScroll();
+        });
+      },
+
+      measureScrollBar() {
+        if (this.view !== 'search') return;
+        this.$nextTick(() => {
+          const track = this.$refs.scrollBarTrack;
+          if (track) this.scrollBarTrackHeight = track.clientHeight;
+          const listEl = this.$refs.searchResultsList;
+          if (listEl) this.listTop = listEl.getBoundingClientRect().top + (window.scrollY ?? 0);
+        });
+      },
+
+      scrollToPosition(pct, instant = false) {
+        const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+        const targetY = Math.max(0, Math.min(maxScroll, pct * maxScroll));
+        window.scrollTo({ top: targetY, behavior: instant ? 'auto' : 'smooth' });
+        this.loadPageAtScrollPosition(targetY);
+      },
+
+      loadPageAtScrollPosition(scrollY) {
+        if (!this.searchResults?.total || this.loadingMore) return;
+        const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+        const pct = scrollY / maxScroll;
+        const targetItemIndex = Math.floor(pct * this.searchResults.total);
+        const targetPage = Math.min(this.totalPages - 1, Math.floor(targetItemIndex / this.pageSize));
+        if (targetPage > this.currentPage) {
+          this.doSearch(this.searchQuery, (this.currentPage + 1) * this.pageSize, true);
+        }
+      },
+
+      onScrollBarTrackClick(e) {
+        if (this.scrollBarDragging) return;
+        const track = this.$refs.scrollBarTrack;
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const clickY = e.clientY - rect.top;
+        const trackH = track.clientHeight;
+        const thumbStyle = this.scrollBarThumbStyle;
+        const thumbH = parseInt(thumbStyle.height, 10);
+        const range = trackH - thumbH;
+        if (range <= 0) return;
+        const pct = Math.min(1, Math.max(0, (clickY - thumbH / 2) / range));
+        this.scrollToPosition(pct);
+      },
+
+      _scrollBarDragStart(clientY) {
+        this.scrollBarDragging = true;
+        const track = this.$refs.scrollBarTrack;
+        const startY = clientY;
+        const startScrollY = this.scrollY;
+        const maxScroll = this.scrollBarMaxScroll;
+        const trackH = track?.clientHeight || 300;
+        const thumbH = parseInt(this.scrollBarThumbStyle.height, 10);
+        const range = trackH - thumbH;
+
+        const move = (ev) => {
+          if (!this.scrollBarDragging) return;
+          const y = ev.touches ? ev.touches[0].clientY : ev.clientY;
+          const dy = y - startY;
+          const pctChange = range > 0 ? dy / range : 0;
+          const pct = Math.min(1, Math.max(0, startScrollY / maxScroll + pctChange));
+          this.scrollToPosition(pct, true);
+        };
+        const end = () => {
+          this.scrollBarDragging = false;
+          window.removeEventListener('mousemove', this._scrollBarMouseMove);
+          window.removeEventListener('mouseup', this._scrollBarMouseUp);
+          window.removeEventListener('touchmove', this._scrollBarTouchMove, { passive: false });
+          window.removeEventListener('touchend', this._scrollBarTouchEnd);
+          window.removeEventListener('touchcancel', this._scrollBarTouchEnd);
+          this._scrollBarMouseMove = null;
+          this._scrollBarMouseUp = null;
+          this._scrollBarTouchMove = null;
+          this._scrollBarTouchEnd = null;
+        };
+
+        this._scrollBarMouseMove = move;
+        this._scrollBarMouseUp = end;
+        this._scrollBarTouchMove = (e) => { e.preventDefault(); move(e); };
+        this._scrollBarTouchEnd = end;
+
+        window.addEventListener('mousemove', this._scrollBarMouseMove);
+        window.addEventListener('mouseup', this._scrollBarMouseUp);
+        window.addEventListener('touchmove', this._scrollBarTouchMove, { passive: false });
+        window.addEventListener('touchend', this._scrollBarTouchEnd);
+        window.addEventListener('touchcancel', this._scrollBarTouchEnd);
+      },
+
+      onScrollBarThumbMouseDown(e) {
+        e.preventDefault();
+        this._scrollBarDragStart(e.clientY);
+      },
+
+      onScrollBarThumbTouchStart(e) {
+        if (e.touches.length) this._scrollBarDragStart(e.touches[0].clientY);
       },
 
       setSearchMode(mode) {

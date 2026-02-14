@@ -23,6 +23,14 @@
   --transition: 0.2s ease;
 }
 
+html {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+html::-webkit-scrollbar {
+  display: none;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg);
@@ -366,6 +374,16 @@ a:hover { text-decoration: underline; }
 /* --- Search progress bar (scrollbar-like on right, viewport-fixed) --- */
 .search-results-wrap {
   position: relative;
+  padding-right: 2rem;
+}
+
+.search-results-list {
+  display: block;
+}
+
+.virtual-spacer {
+  flex-shrink: 0;
+  min-height: 0;
 }
 
 .search-progress-wrap {
@@ -377,8 +395,6 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   align-items: center;
   z-index: 50;
-  filter: drop-shadow(2px 4px 6px black);
-
 }
 
 *, *::before, *::after {
@@ -431,6 +447,59 @@ a:hover { text-decoration: underline; }
   transition: height 0.2s ease;
 }
 
+.search-scroll-bar-track {
+  cursor: pointer;
+}
+
+.search-scroll-bar-fill {
+  opacity: 0.25;
+}
+
+.search-scroll-bar-thumb {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--accent);
+  border-radius: 3px;
+  cursor: grab;
+  transition: top 0.05s ease-out;
+  z-index: 2;
+}
+
+.search-scroll-bar-thumb:active {
+  cursor: grabbing;
+}
+
+.email-card-placeholder {
+  cursor: default;
+  pointer-events: none;
+  contain: layout style paint;
+}
+
+.email-card-placeholder:hover {
+  transform: none;
+  border-color: var(--border);
+}
+
+.email-card-skeleton {
+  min-height: 4.5rem;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.email-card-spacer {
+  min-height: 1px;
+  margin-bottom: 0.4rem;
+  background: transparent;
+}
+
 /* --- Email results --- */
 .email-card {
   background: var(--surface);
@@ -445,6 +514,7 @@ a:hover { text-decoration: underline; }
   margin-bottom: 0.4rem;
   overflow: auto;
   word-wrap: break-word;
+  contain: layout style paint;
 }
 
 .email-card:hover {
