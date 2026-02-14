@@ -5,6 +5,9 @@
 (async () => {
   'use strict';
 
+  const KB = 1024;
+  const MB = KB * KB;
+
   const templateResponse = await fetch('/static/js/app/main.template.vue');
   const templateHTML = await templateResponse.text();
 
@@ -71,22 +74,30 @@
 
       importProgressDetail() {
         if (!this.importJob) return '';
-        const j = this.importJob;
-        if (j.phase === 'uploading' && j.total > 0) return `${j.current} / ${j.total} MB`;
-        if (j.phase === 'extracting') return `${j.current} messages`;
-        if (j.phase === 'done') return `${j.current} messages imported`;
-        return '';
+        const { phase, current, total } = this.importJob;
+        let detail;
+        switch (phase) {
+          case 'uploading': detail = total > 0 ? `${current} / ${total} MB` : ''; break;
+          case 'extracting': detail = `${current} messages`; break;
+          case 'done': detail = `${current} messages imported`; break;
+          default: detail = '';
+        }
+        return detail;
       },
 
       importPercent() {
         if (!this.importJob) return 0;
-        const j = this.importJob;
-        if (j.phase === 'done') return 100;
-        if (j.phase === 'error') return 0;
-        if (j.total > 0) return Math.min(99, Math.round(j.current / j.total * 100));
-        if (j.phase === 'extracting' && j.current > 0) return 50;
-        if (j.phase === 'indexing') return 90;
-        return 0;
+        const { phase, current, total } = this.importJob;
+        let pct;
+        switch (phase) {
+          case 'done': pct = 100; break;
+          case 'error': pct = 0; break;
+          case 'uploading': pct = total > 0 ? Math.min(99, Math.round(current / total * 100)) : 0; break;
+          case 'extracting': pct = current > 0 ? 50 : 0; break;
+          case 'indexing': pct = 90; break;
+          default: pct = 0;
+        }
+        return pct;
       }
     },
 
@@ -108,19 +119,14 @@
           const rest = hash.slice(8);
           const qIdx = rest.indexOf('?');
           const emailPath = decodeURIComponent(qIdx >= 0 ? rest.slice(0, qIdx) : rest);
-          let accountId = null;
-          if (qIdx >= 0) {
-            const params = new URLSearchParams(rest.slice(qIdx));
-            accountId = params.get('account_id');
-          }
+          const accountId = qIdx >= 0 ? new URLSearchParams(rest.slice(qIdx)).get('account_id') : null;
           this.showEmailDetail(emailPath, accountId);
-        } else if (hash === '#/accounts') {
-          this.view = 'accounts';
-          this.loadSyncStatus();
-        } else if (hash === '#/import') {
-          this.view = 'import';
-        } else {
-          this.view = 'search';
+          return;
+        }
+        switch (hash) {
+          case '#/accounts': this.view = 'accounts'; this.loadSyncStatus(); break;
+          case '#/import': this.view = 'import'; break;
+          default: this.view = 'search';
         }
       },
 
@@ -377,13 +383,12 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(accountID ? { account_id: accountID } : {})
           });
-          if (r.status === 409) {
-            this.showToast('Sync already running', 'warning');
-          } else if (!r.ok) {
-            throw new Error();
-          } else {
-            this.showToast('Sync started', 'success');
-            this.pollSyncStatus();
+          switch (r.status) {
+            case 409: this.showToast('Sync already running', 'warning'); break;
+            case 200:
+            case 201:
+            case 204: this.showToast('Sync started', 'success'); this.pollSyncStatus(); break;
+            default: throw new Error();
           }
         } catch {
           this.showToast('Sync failed', 'error');
@@ -448,9 +453,13 @@
 
       formatSize(bytes) {
         if (!bytes) return '';
-        if (bytes < 1024) return `${bytes} B`;
-        if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-        return `${(bytes / 1048576).toFixed(1)} MB`;
+        let value, unit;
+        switch (true) {
+          case bytes >= MB: value = (bytes / MB).toFixed(1); unit = 'MB'; break;
+          case bytes >= KB: value = (bytes / KB).toFixed(1); unit = 'KB'; break;
+          default: value = String(bytes); unit = 'B';
+        }
+        return `${value} ${unit}`;
       },
 
       // --- PST/OST Import ---
@@ -475,8 +484,8 @@
           if (e.lengthComputable) {
             this.importJob = {
               phase: 'uploading',
-              current: Math.round(e.loaded / (1024 * 1024)),
-              total: Math.round(e.total / (1024 * 1024))
+              current: Math.round(e.loaded / MB),
+              total: Math.round(e.total / MB)
             };
           }
         });
@@ -511,19 +520,15 @@
             if (!r.ok) return;
             const data = await r.json();
             this.importJob = data;
-            if (data.phase === 'done') {
+            const finish = () => {
               clearInterval(this.importPollTimer);
               this.importPollTimer = null;
               this.importRunning = false;
               this.importHistory.unshift(data);
-              this.loadAccounts();
-              this.showToast(`Import complete: ${data.current} messages`, 'success');
-            } else if (data.phase === 'error') {
-              clearInterval(this.importPollTimer);
-              this.importPollTimer = null;
-              this.importRunning = false;
-              this.importHistory.unshift(data);
-              this.showToast(`Import failed: ${data.error}`, 'error');
+            };
+            switch (data.phase) {
+              case 'done': finish(); this.loadAccounts(); this.showToast(`Import complete: ${data.current} messages`, 'success'); break;
+              case 'error': finish(); this.showToast(`Import failed: ${data.error}`, 'error'); break;
             }
           } catch {
             // ignore poll errors
