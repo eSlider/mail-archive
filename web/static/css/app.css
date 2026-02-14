@@ -307,6 +307,7 @@ a:hover { text-decoration: underline; }
 .search-box {
   position: relative;
   margin-bottom: 1.25rem;
+  margin-right: 15px;
 }
 
 .search-box input {
@@ -374,7 +375,7 @@ a:hover { text-decoration: underline; }
 /* --- Search progress bar (scrollbar-like on right, viewport-fixed) --- */
 .search-results-wrap {
   position: relative;
-  padding-right: 2rem;
+  padding-right: 15px;
 }
 
 .search-results-list {
@@ -388,8 +389,8 @@ a:hover { text-decoration: underline; }
 
 .search-progress-wrap {
   position: fixed;
-  right: 0.5rem;
-  top: 63px;
+  right: 0;
+  top: 55px;
   bottom: 7px;
   display: flex;
   flex-direction: column;
@@ -431,7 +432,7 @@ a:hover { text-decoration: underline; }
   left: 50%;
   transform: translate(-50%, -50%) rotate(-90deg);
   font-size: 0.68rem;
-  color: var(--accent);
+  color: #000;
   white-space: nowrap;
   pointer-events: none;
   -webkit-filter: invert(100%);
@@ -464,6 +465,7 @@ a:hover { text-decoration: underline; }
   cursor: grab;
   transition: top 0.05s ease-out;
   z-index: 2;
+  opacity: 0.5;
 }
 
 .search-scroll-bar-thumb:active {
@@ -1007,6 +1009,7 @@ select.form-control {
   .search-meta {
     flex-direction: column;
     align-items: flex-start;
+    margin-bottom: 13px;
   }
 }
 
