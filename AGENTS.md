@@ -59,8 +59,9 @@ cmd → internal/web → internal/sync → internal/model
 
 ## Coding Guidelines
 
+- **Do NOT add yourself as co-author**
 - **NEVER REMOVE EMAILS** from server
-- **Go 1.24+**, strict typing
+- **Go 1.25+**, strict typing
 - **No classes unless necessary** — prefer pure functions
 - **Minimal dependencies** — stdlib first
 - **Comments in English only**
@@ -76,6 +77,7 @@ cmd → internal/web → internal/sync → internal/model
 ### 1. Tests (High Priority)
 
 Write unit tests using `go test`. Key areas:
+
 - `internal/auth/`: session create/get/delete, token generation
 - `internal/user/`: FindOrCreate, directory creation
 - `internal/account/`: CRUD operations, YAML serialization
@@ -87,6 +89,7 @@ Write unit tests using `go test`. Key areas:
 ### 2. Gmail API Sync (Medium Priority)
 
 Complete the Gmail API sync implementation in `internal/sync/gmail/`:
+
 - OAuth2 token management using `golang.org/x/oauth2/google`
 - Gmail API client for message listing and raw RFC822 fetch
 - Label → filesystem path mapping
@@ -95,6 +98,7 @@ Complete the Gmail API sync implementation in `internal/sync/gmail/`:
 ### 3. Search Per User/Account (Medium Priority)
 
 Refactor search to work per-user:
+
 - Index emails per account into `users/{uuid}/{domain}/{local}/index.parquet`
 - Cross-account search within a single user
 - Cache indices in memory with LRU eviction
@@ -102,6 +106,7 @@ Refactor search to work per-user:
 ### 4. Scheduled Sync (Medium Priority)
 
 Implement periodic sync based on account `sync.interval`:
+
 - Background goroutine per user with ticker
 - Structured JSONL logs in `users/{uuid}/logs/`
 - Health endpoint with per-account sync status
@@ -109,6 +114,7 @@ Implement periodic sync based on account `sync.interval`:
 ### 5. Data Migration (Low Priority)
 
 Migrate existing `emails/` data to new `users/{uuid}/` structure:
+
 - Script to create user, import accounts from `config/*.yml`
 - Move `.eml` files to new path format
 - Convert `.sync_state` files to SQLite entries
