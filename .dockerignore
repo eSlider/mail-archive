@@ -1,0 +1,50 @@
+# Version control
+.git
+.github
+
+# User data (mounted at runtime)
+users
+
+# Large assets and legacy data
+data
+emails
+
+# Legacy
+scripts
+
+# Docs and config (not needed in image)
+*.md
+docs
+config
+.env
+.env.*
+
+# Docker (not needed inside image)
+docker-compose*.yml
+Dockerfile
+
+# Tests (not needed for build)
+tests
+
+# Standalone CLI (not built by this image)
+search
+
+# IDE and tooling
+.cursor
+.idea
+.vscode
+*.swp
+*.swo
+
+# Python / venv
+.venv
+__pycache__
+*.pyc
+
+# Build artifacts and local data
+*.parquet
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.sync_state*
+/mails

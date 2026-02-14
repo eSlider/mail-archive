@@ -97,6 +97,8 @@ func NewRouter(cfg Config) http.Handler {
 		// Search API.
 		r.Get("/api/search", handleSearch(cfg))
 		r.Get("/api/email", handleEmailDetail(cfg))
+		r.Get("/api/email/download", handleEmailDownload(cfg))
+		r.Get("/api/email/attachment", handleAttachmentDownload(cfg))
 		r.Get("/api/stats", handleSearchStats(cfg))
 		r.Post("/api/reindex", handleReindex(cfg))
 	})

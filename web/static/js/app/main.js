@@ -24,6 +24,7 @@
         currentPage: 0,
         pageSize: 50,
         selectedEmail: null,
+        detailAccountId: null,
         loading: false,
         syncStatuses: [],
         syncStatusMap: {},
@@ -325,6 +326,7 @@
         this.view = 'detail'
         this.loading = true
         this.selectedEmail = null
+        this.detailAccountId = accountId || null
 
         var url = '/api/email?path=' + encodeURIComponent(path)
         if (accountId) url += '&account_id=' + encodeURIComponent(accountId)
@@ -352,6 +354,20 @@
 
       goBack: function () {
         history.back()
+      },
+
+      emailDownloadUrl: function () {
+        if (!this.selectedEmail || !this.selectedEmail.path) return '#'
+        var url = '/api/email/download?path=' + encodeURIComponent(this.selectedEmail.path)
+        if (this.detailAccountId) url += '&account_id=' + encodeURIComponent(this.detailAccountId)
+        return url
+      },
+
+      attachmentDownloadUrl: function (index) {
+        if (!this.selectedEmail || !this.selectedEmail.path) return '#'
+        var url = '/api/email/attachment?path=' + encodeURIComponent(this.selectedEmail.path) + '&index=' + index
+        if (this.detailAccountId) url += '&account_id=' + encodeURIComponent(this.detailAccountId)
+        return url
       },
 
       // --- Sync ---

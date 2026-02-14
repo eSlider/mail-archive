@@ -486,6 +486,94 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
 	}
 }
 
+// ExtractAttachment reads the Nth attachment (0-based index) from an .eml file.
+// Returns the raw bytes, content-type, filename, and any error.
+func ExtractAttachment(path string, index int) ([]byte, string, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	msg, err := mail.ReadMessage(bufio.NewReader(f))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	ct := msg.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		mediaType = "text/plain"
+		params = nil
+	}
+
+	if !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, "", "", fmt.Errorf("email has no attachments")
+	}
+
+	boundary := params["boundary"]
+	if boundary == "" {
+		return nil, "", "", fmt.Errorf("multipart missing boundary")
+	}
+
+	var data []byte
+	var contentType, filename string
+	var found bool
+	var idx int
+	extractPartByIndex(multipart.NewReader(msg.Body, boundary), index, &idx, &data, &contentType, &filename, &found)
+	if !found {
+		return nil, "", "", fmt.Errorf("attachment index %d out of range", index)
+	}
+	return data, contentType, filename, nil
+}
+
+func extractPartByIndex(mr *multipart.Reader, targetIndex int, currentIndex *int, outData *[]byte, outContentType, outFilename *string, found *bool) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		ct := part.Header.Get("Content-Type")
+		cte := part.Header.Get("Content-Transfer-Encoding")
+		if ct == "" {
+			ct = "text/plain"
+		}
+		partMedia, partParams, _ := mime.ParseMediaType(ct)
+		disposition := part.Header.Get("Content-Disposition")
+		isAttachment := strings.HasPrefix(disposition, "attachment") ||
+			(part.FileName() != "" && !strings.HasPrefix(partMedia, "text/"))
+
+		if isAttachment {
+			if *currentIndex == targetIndex {
+				decoded := decodeTransferEncoding(part, cte)
+				data, readErr := io.ReadAll(io.LimitReader(decoded, 50*1024*1024))
+				part.Close()
+				if readErr != nil {
+					return
+				}
+				*outData = data
+				*outContentType = partMedia
+				*outFilename = ensureUTF8(decodeHeader(part.FileName()))
+				*found = true
+				return
+			}
+			*currentIndex++
+			part.Close()
+			continue
+		}
+
+		if strings.HasPrefix(partMedia, "multipart/") && partParams["boundary"] != "" {
+			extractPartByIndex(multipart.NewReader(part, partParams["boundary"]), targetIndex, currentIndex, outData, outContentType, outFilename, found)
+			part.Close()
+			if *found {
+				return
+			}
+			continue
+		}
+		part.Close()
+	}
+}
+
 // Snippet returns a short context window around the first occurrence of query.
 func Snippet(e Email, query string, contextLen int) string {
 	q := strings.ToLower(query)

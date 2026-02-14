@@ -358,7 +358,15 @@ func handleSyncStatus(syncSvc *sync.Service, accounts *account.Store) http.Handl
 		var statuses []map[string]any
 		for _, acct := range accts {
 			if acct.Type == model.AccountTypePST {
-				continue // PST is import-only, no sync status
+				// PST is import-only: return clean status, no last_error from old sync attempts.
+				statuses = append(statuses, map[string]any{
+					"id":      acct.ID,
+					"name":    acct.Email,
+					"type":    "PST",
+					"syncing": false,
+					"import_only": true,
+				})
+				continue
 			}
 			statuses = append(statuses, syncSvc.AccountStatus(userID, acct))
 		}
@@ -491,6 +499,90 @@ func handleEmailDetail(cfg Config) http.HandlerFunc {
 		}
 		fe.Path = cleaned
 		writeJSON(w, http.StatusOK, fe)
+	}
+}
+
+// resolveEmailPath returns the full filesystem path for an email from path + account_id query params.
+func resolveEmailPath(cfg Config, r *http.Request) (string, bool) {
+	userID := auth.UserIDFromContext(r.Context())
+	p := r.URL.Query().Get("path")
+	accountID := r.URL.Query().Get("account_id")
+	if p == "" {
+		return "", false
+	}
+	cleaned := filepath.Clean(p)
+	if strings.Contains(cleaned, "..") {
+		return "", false
+	}
+	accts, _ := cfg.Accounts.List(userID)
+	var emailDir string
+	if accountID != "" {
+		for _, a := range accts {
+			if a.ID == accountID {
+				emailDir = account.EmailDir(cfg.UsersDir, userID, a)
+				break
+			}
+		}
+	} else if len(accts) > 0 {
+		emailDir = account.EmailDir(cfg.UsersDir, userID, accts[0])
+	}
+	if emailDir == "" {
+		return "", false
+	}
+	return filepath.Join(emailDir, cleaned), true
+}
+
+func handleEmailDownload(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		full, ok := resolveEmailPath(cfg, r)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "missing or invalid path")
+			return
+		}
+		if _, err := os.Stat(full); err != nil {
+			writeError(w, http.StatusNotFound, "email not found")
+			return
+		}
+		name := filepath.Base(full)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+		w.Header().Set("Content-Type", "message/rfc822")
+		f, err := os.Open(full)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read email")
+			return
+		}
+		defer f.Close()
+		io.Copy(w, f)
+	}
+}
+
+func handleAttachmentDownload(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		full, ok := resolveEmailPath(cfg, r)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "missing or invalid path")
+			return
+		}
+		index := queryInt(r, "index", -1)
+		if index < 0 {
+			writeError(w, http.StatusBadRequest, "missing or invalid index parameter")
+			return
+		}
+		data, contentType, filename, err := eml.ExtractAttachment(full, index)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return
+		}
+		if filename == "" {
+			filename = "attachment"
+		}
+		// Escape quotes in filename to avoid breaking header
+		safeName := strings.ReplaceAll(filename, `"`, `_`)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+safeName+`"`)
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.Write(data)
 	}
 }
 

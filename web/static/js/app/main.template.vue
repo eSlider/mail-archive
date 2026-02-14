@@ -167,10 +167,16 @@
 
   <!-- Email Detail View -->
   <div v-if="view === 'detail'" class="container">
-    <a class="back-link" @click.prevent="goBack">
-      <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
-      Back to results
-    </a>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:0.5rem">
+      <a class="back-link" @click.prevent="goBack">
+        <svg width="16" height="16" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
+        Back to results
+      </a>
+      <a v-if="selectedEmail" :href="emailDownloadUrl()" class="btn btn-sm" download style="display:inline-flex;align-items:center;gap:0.4rem">
+        <svg width="14" height="14" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M16 16v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2"/></svg>
+        Download .eml
+      </a>
+    </div>
     <div v-if="loading" style="text-align:center;padding:3rem"><span class="spinner" style="width:32px;height:32px;border-width:3px"></span></div>
     <div v-else-if="selectedEmail" class="detail-card">
       <div class="detail-header">
@@ -190,9 +196,11 @@
       <div v-if="selectedEmail.attachments && selectedEmail.attachments.length" style="border-top:1px solid var(--border);padding:1rem 1.5rem">
         <h3 style="font-size:0.82rem;color:var(--text-dim);font-weight:600;margin-bottom:0.5rem;text-transform:uppercase">Attachments ({{ selectedEmail.attachments.length }})</h3>
         <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
-          <span v-for="att in selectedEmail.attachments" :key="att.filename" style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.75rem;font-size:0.8rem;display:flex;align-items:center;gap:0.4rem">
+          <a v-for="(att, idx) in selectedEmail.attachments" :key="att.filename + '-' + idx" :href="attachmentDownloadUrl(idx)" :download="att.filename || 'attachment'" style="background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.75rem;font-size:0.8rem;display:flex;align-items:center;gap:0.4rem;text-decoration:none;color:inherit;cursor:pointer;transition:border-color 0.15s"
+            @mouseover="$event.currentTarget.style.borderColor='var(--primary)'" @mouseout="$event.currentTarget.style.borderColor='var(--border)'">
+            <svg width="12" height="12" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
             {{ att.filename || "unnamed" }} <span style="color:var(--text-dim)">{{ formatSize(att.size) }}</span>
-          </span>
+          </a>
         </div>
       </div>
     </div>
