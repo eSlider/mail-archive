@@ -54,6 +54,11 @@ func NewRouter(cfg Config) http.Handler {
 		r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(StaticDir))))
 	}
 
+	// Favicon: browsers request /favicon.ico by default; redirect to our SVG.
+	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/static/favicon.svg", http.StatusMovedPermanently)
+	})
+
 	// Public routes.
 	r.Group(func(r chi.Router) {
 		r.Get("/login", handleLoginPage())

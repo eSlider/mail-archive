@@ -1,4 +1,0 @@
-# nomic-embed-text Q8_0 (unofficial)
-# Source: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF
-# Smaller & faster than F16, minimal quality loss
-FROM https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf

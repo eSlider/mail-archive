@@ -62,6 +62,12 @@
         return Math.ceil(this.searchResults.total / this.pageSize);
       },
 
+      searchLoadProgress() {
+        if (!this.searchResults?.total || this.searchResults.total === 0) return 0;
+        const loaded = this.searchResults.hits?.length ?? 0;
+        return Math.min(100, (loaded / this.searchResults.total) * 100);
+      },
+
       importPhaseLabel() {
         if (!this.importJob) return '';
         const labels = {
@@ -305,12 +311,6 @@
         }
       },
 
-      goToPage(page) {
-        this.currentPage = page;
-        this.doSearch(this.searchQuery, page * this.pageSize);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      },
-
       loadMore() {
         if (this.loadingMore || !this.searchResults?.hits?.length) return;
         if (this.currentPage >= this.totalPages - 1) return;
@@ -318,7 +318,7 @@
       },
 
       setupLoadMoreObserver() {
-        if (!this.isMobile || this.view !== 'search') return;
+        if (this.view !== 'search') return;
         const sentinel = this.$refs.loadMoreSentinel;
         if (!sentinel) {
           this._loadMoreObserverSetup = false;
@@ -362,6 +362,12 @@
         let h = `#/email/${encodeURIComponent(hit.path)}`;
         if (hit.account_id) h += `?account_id=${encodeURIComponent(hit.account_id)}`;
         return h;
+      },
+
+      folderFromPath(path) {
+        if (!path) return '';
+        const parts = path.split('/').filter(Boolean);
+        return parts.length >= 2 ? parts[parts.length - 2] : '';
       },
 
       highlightText(text, query) {
@@ -634,21 +640,6 @@
         }, 1500);
       },
 
-      pagerRange() {
-        const total = this.totalPages;
-        const current = this.currentPage;
-        const start = Math.max(0, current - 2);
-        const end = Math.min(total - 1, current + 2);
-        const pages = [];
-
-        if (start > 0) pages.push({ num: 0, label: '1' });
-        if (start > 1) pages.push({ num: -1, label: '...' });
-        for (let i = start; i <= end; i++) pages.push({ num: i, label: String(i + 1) });
-        if (end < total - 2) pages.push({ num: -1, label: '...' });
-        if (end < total - 1) pages.push({ num: total - 1, label: String(total) });
-
-        return pages;
-      }
     }
   };
 

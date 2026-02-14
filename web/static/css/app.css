@@ -363,6 +363,71 @@ a:hover { text-decoration: underline; }
   color: var(--text-dim);
 }
 
+/* --- Search progress bar (scrollbar-like on right, viewport-fixed) --- */
+.search-results-wrap {
+  position: relative;
+}
+
+.search-progress-wrap {
+  position: fixed;
+  right: 0.5rem;
+  top: 63px;
+  bottom: 7px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  z-index: 50;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+@media (max-width: 768px) {
+  .search-progress-wrap {
+    bottom: calc(56px + env(safe-area-inset-bottom, 0));
+  }
+}
+
+.search-progress-bar {
+  flex: 1;
+  width: 20px;
+  min-height: 60px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: visible;
+  position: relative;
+}
+
+.search-progress-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.search-progress-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: height 0.2s ease;
+}
+
 /* --- Email results --- */
 .email-card {
   background: var(--surface);
@@ -385,11 +450,24 @@ a:hover { text-decoration: underline; }
   text-decoration: none;
 }
 
+.email-subject-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.3rem;
+}
+
 .email-subject {
   font-weight: 600;
   font-size: 0.92rem;
-  margin-bottom: 0.3rem;
   line-height: 1.4;
+}
+
+.email-folder {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .email-subject mark, .email-snippet mark {
