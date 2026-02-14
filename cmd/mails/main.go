@@ -120,9 +120,14 @@ func runServe() {
 
 	providers := auth.NewProviders(baseURL, ghCfg, glCfg, fbCfg)
 
-	// Set static assets path.
+	// Set static assets and templates path.
 	staticDir := envOr("STATIC_DIR", "./web/static")
+	templateDir := envOr("TEMPLATE_DIR", "")
 	web.StaticDir = staticDir
+	web.TemplateDir = templateDir
+	if templateDir != "" {
+		web.ReloadTemplates()
+	}
 
 	// Build router.
 	router := web.NewRouter(web.Config{

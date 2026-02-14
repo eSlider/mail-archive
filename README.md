@@ -102,7 +102,9 @@ users/
 ## Architecture
 
 ```
-cmd/mails/         → Entry point, CLI (serve, fix-dates, version)
+cmd/
+  mails/           → Entry point, CLI (serve, fix-dates, version)
+  mail-search/     → Standalone search CLI (optional, EMAILS_DIR + Qdrant/Ollama)
 internal/
   auth/            → OAuth2 (GitHub, Google, Facebook), sessions
   user/            → User storage (users/{uuid}/)

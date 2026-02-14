@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/eslider/mails/search/index"
+	"github.com/eslider/mails/internal/search/index"
 )
 
 // newTestIndex creates an in-memory index (no parquet persistence) for testing.

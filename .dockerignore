@@ -27,7 +27,6 @@ Dockerfile
 tests
 
 # Standalone CLI (not built by this image)
-search
 
 # IDE and tooling
 .cursor

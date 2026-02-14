@@ -371,11 +371,35 @@
       },
 
       // --- Sync ---
-      loadSyncStatus: function () {
+      fetchAndApplySyncStatus: function (onApplied) {
         var self = this
         $.getJSON('/api/sync/status').done(function (data) {
-          self.syncStatuses = data || []
+          var list = data || []
+          self.syncStatuses = list
+          var m = {}
+          for (var i = 0; i < list.length; i++) {
+            m[list[i].id] = list[i]
+          }
+          self.syncStatusMap = m
+          for (var j = 0; j < list.length; j++) {
+            var s = list[j]
+            if (s.last_error && !s.syncing) {
+              var key = 'sync_error_' + s.id
+              if (!self._shownErrors) self._shownErrors = {}
+              if (!self._shownErrors[key]) {
+                self._shownErrors[key] = true
+                self.showToast(s.name + ': ' + s.last_error, 'error')
+              }
+            } else {
+              if (self._shownErrors) delete self._shownErrors['sync_error_' + s.id]
+            }
+          }
+          if (typeof onApplied === 'function') onApplied(list)
         })
+      },
+
+      loadSyncStatus: function () {
+        this.fetchAndApplySyncStatus()
       },
 
       triggerSync: function (accountID) {
@@ -426,38 +450,14 @@
       },
 
       refreshSyncStatus: function () {
-        var self = this
-        $.getJSON('/api/sync/status').done(function (data) {
-          self.syncStatuses = data || []
-          var m = {}
-          for (var i = 0; i < (data || []).length; i++) {
-            m[data[i].id] = data[i]
-          }
-          self.syncStatusMap = m
-
-          // Show error notifications for accounts with errors.
-          for (var j = 0; j < (data || []).length; j++) {
-            var s = data[j]
-            if (s.last_error && !s.syncing) {
-              var key = 'sync_error_' + s.id
-              if (!self._shownErrors) self._shownErrors = {}
-              if (!self._shownErrors[key]) {
-                self._shownErrors[key] = true
-                self.showToast(s.name + ': ' + s.last_error, 'error')
-              }
-            } else {
-              if (self._shownErrors) delete self._shownErrors['sync_error_' + s.id]
-            }
-          }
-        })
+        this.fetchAndApplySyncStatus()
       },
 
       pollSyncStatus: function () {
         var self = this
         var poll = setInterval(function () {
-          $.getJSON('/api/sync/status').done(function (data) {
-            self.syncStatuses = data || []
-            var anySyncing = data.some(function (s) { return s.syncing })
+          self.fetchAndApplySyncStatus(function (list) {
+            var anySyncing = list.some(function (s) { return s.syncing })
             if (!anySyncing) {
               clearInterval(poll)
               self.showToast('Sync complete', 'success')

@@ -17,7 +17,9 @@ mails/
 │   │   ├── pop3/        # POP3 protocol sync
 │   │   ├── gmail/       # Gmail API sync
 │   │   └── pst/         # PST/OST file import (go-pst library)
-│   ├── search/          # Email search & indexing
+│   ├── cmd/
+│   │   ├── mails/       # Main app
+│   │   └── mail-search/ # Standalone search CLI
 │   │   ├── eml/         # .eml file parser
 │   │   ├── index/       # DuckDB + Parquet index
 │   │   └── vector/      # Qdrant similarity search
@@ -122,6 +124,24 @@ go test ./internal/search/eml/
 ```
 
 Use `testing.T` and table-driven tests. Mock external services (IMAP, POP3, APIs).
+
+## Templates (Gitea-style)
+
+HTML templates are stored in separate `.tmpl` files and embedded at build time:
+
+```
+internal/web/
+  templates/
+    auth/
+      login.tmpl     # Login page ({{.Error}} for validation messages)
+      register.tmpl  # Register page
+    dashboard.tmpl   # SPA shell (Vue app mount point)
+  templates.go      # embed + parse + renderLogin/renderRegister/renderDashboard
+```
+
+- Use `html/template` for escaping; auth templates accept `{{.Error}}`.
+- Set `TEMPLATE_DIR` to override with custom files at runtime (e.g. `./internal/web/templates` for dev).
+- Call `web.ReloadTemplates()` after changing `TemplateDir`.
 
 ## Frontend Guidelines
 

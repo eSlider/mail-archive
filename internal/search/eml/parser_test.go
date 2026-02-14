@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/eslider/mails/search/eml"
+	"github.com/eslider/mails/internal/search/eml"
 )
 
 func writeTestEml(t *testing.T, dir, name, content string) string {
@@ -287,7 +287,7 @@ func TestParseFile_Windows1252Body(t *testing.T) {
 
 func TestParseFile_KOI8REncodedSubject(t *testing.T) {
 	dir := t.TempDir()
-	// Real-world KOI8-R MIME-encoded subject: "eSlider ПРЕДЛАГАЕТ Вам ЗАВЕСТИ АДРЕС В Почтовой Службе Google Mail."
+	// Real-world KOI8-R MIME-encoded subject
 	raw := "From: eslider@gmail.com\r\nTo: test@example.com\r\n" +
 		"Subject: =?KOI8-R?B?ZVNsaWRlciDQ0sXEzMHHwcXUIPfBzSDawdfF09TJIMHE?=\r\n" +
 		" =?KOI8-R?B?0sXTINcg0M/e1M/Xz8og08zV1sLFIEdvb2dsZSBNYWlsLg==?=\r\n" +
@@ -336,7 +336,6 @@ func TestParseFile_RawNonUTF8Header(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// ensureUTF8 should decode Windows-1252 fallback to get "Grüße"
 	if !strings.Contains(e.Subject, "Grüße") {
 		t.Errorf("subject should contain 'Grüße', got %q", e.Subject)
 	}
@@ -344,7 +343,6 @@ func TestParseFile_RawNonUTF8Header(t *testing.T) {
 
 func TestParseFile_NoContentTypeLatinBody(t *testing.T) {
 	dir := t.TempDir()
-	// Email with no Content-Type header at all, body has raw Latin-1 bytes.
 	raw := "From: support@hetzner.de\r\nTo: test@example.com\r\nSubject: Auftragsbest\xe4tigung\r\nDate: Mon, 31 Oct 2005 17:37:02 +0100\r\n\r\nbaldm\xf6glichst ausf\xfchren.\r\nMit freundlichen Gr\xfc\xdfen\r\n"
 	path := writeTestEml(t, dir, "no-ct.eml", raw)
 

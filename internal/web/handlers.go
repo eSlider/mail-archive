@@ -31,7 +31,7 @@ import (
 func handleLoginPage() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(loginHTML))
+		_ = renderLogin(w, "")
 	}
 }
 
@@ -46,14 +46,14 @@ func handleLoginSubmit(sessions *auth.SessionStore, users *user.Store) http.Hand
 
 		if email == "" || password == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(loginHTMLWithError("Email and password are required.")))
+			_ = renderLogin(w, "Email and password are required.")
 			return
 		}
 
 		u := users.FindByEmail(email)
 		if u == nil || !auth.CheckPassword(u.PasswordHash, password) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(loginHTMLWithError("Invalid email or password.")))
+			_ = renderLogin(w, "Invalid email or password.")
 			return
 		}
 
@@ -71,7 +71,7 @@ func handleLoginSubmit(sessions *auth.SessionStore, users *user.Store) http.Hand
 func handleRegisterPage() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(registerHTML))
+		_ = renderRegister(w, "")
 	}
 }
 
@@ -89,27 +89,27 @@ func handleRegisterSubmit(sessions *auth.SessionStore, users *user.Store) http.H
 
 		if name == "" || email == "" || password == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(registerHTMLWithError("All fields are required.")))
+			_ = renderRegister(w, "All fields are required.")
 			return
 		}
 
 		if password != confirm {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(registerHTMLWithError("Passwords do not match.")))
+			_ = renderRegister(w, "Passwords do not match.")
 			return
 		}
 
 		hash, err := auth.HashPassword(password)
 		if err != nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(registerHTMLWithError(err.Error())))
+			_ = renderRegister(w, err.Error())
 			return
 		}
 
 		u, err := users.CreateWithPassword(name, email, hash)
 		if err != nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Write([]byte(registerHTMLWithError(err.Error())))
+			_ = renderRegister(w, err.Error())
 			return
 		}
 
@@ -205,7 +205,7 @@ func handleLogout(sessions *auth.SessionStore) http.HandlerFunc {
 func handleDashboard() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(dashboardHTML))
+		_ = renderDashboard(w)
 	}
 }
 
@@ -360,10 +360,10 @@ func handleSyncStatus(syncSvc *sync.Service, accounts *account.Store) http.Handl
 			if acct.Type == model.AccountTypePST {
 				// PST is import-only: return clean status, no last_error from old sync attempts.
 				statuses = append(statuses, map[string]any{
-					"id":      acct.ID,
-					"name":    acct.Email,
-					"type":    "PST",
-					"syncing": false,
+					"id":          acct.ID,
+					"name":        acct.Email,
+					"type":        "PST",
+					"syncing":     false,
 					"import_only": true,
 				})
 				continue
@@ -653,174 +653,6 @@ func generateState() string {
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }
-
-// --- Embedded HTML ---
-
-const loginHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mail Archive — Sign In</title>
-<link rel="stylesheet" href="/static/css/app.css">
-</head>
-<body class="login-page">
-<div class="login-container">
-  <h1>Mail Archive</h1>
-  <p class="login-subtitle">Sign in to your account</p>
-  <form method="POST" action="/login" class="auth-form">
-    <div class="form-group">
-      <label for="email">Email</label>
-      <input class="form-control" id="email" name="email" type="email" placeholder="you@example.com" required autofocus>
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input class="form-control" id="password" name="password" type="password" placeholder="Your password" required>
-    </div>
-    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem">Sign In</button>
-  </form>
-  <p class="auth-switch">Don't have an account? <a href="/register">Create one</a></p>
-  <a href="https://github.com/eSlider/mail-archive" target="_blank" rel="noopener" class="github-link" style="margin-top:1.5rem;display:inline-flex;align-items:center;gap:0.4rem;color:#6b7280;font-size:0.8rem" title="View on GitHub">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    GitHub
-  </a>
-</div>
-</body>
-</html>`
-
-func loginHTMLWithError(errMsg string) string {
-	return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mail Archive — Sign In</title>
-<link rel="stylesheet" href="/static/css/app.css">
-</head>
-<body class="login-page">
-<div class="login-container">
-  <h1>Mail Archive</h1>
-  <p class="login-subtitle">Sign in to your account</p>
-  <div class="auth-error">` + errMsg + `</div>
-  <form method="POST" action="/login" class="auth-form">
-    <div class="form-group">
-      <label for="email">Email</label>
-      <input class="form-control" id="email" name="email" type="email" placeholder="you@example.com" required autofocus>
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input class="form-control" id="password" name="password" type="password" placeholder="Your password" required>
-    </div>
-    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem">Sign In</button>
-  </form>
-  <p class="auth-switch">Don't have an account? <a href="/register">Create one</a></p>
-  <a href="https://github.com/eSlider/mail-archive" target="_blank" rel="noopener" class="github-link" style="margin-top:1.5rem;display:inline-flex;align-items:center;gap:0.4rem;color:#6b7280;font-size:0.8rem" title="View on GitHub">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    GitHub
-  </a>
-</div>
-</body>
-</html>`
-}
-
-const registerHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mail Archive — Register</title>
-<link rel="stylesheet" href="/static/css/app.css">
-</head>
-<body class="login-page">
-<div class="login-container">
-  <h1>Mail Archive</h1>
-  <p class="login-subtitle">Create your account</p>
-  <form method="POST" action="/register" class="auth-form">
-    <div class="form-group">
-      <label for="name">Name</label>
-      <input class="form-control" id="name" name="name" type="text" placeholder="Your name" required autofocus>
-    </div>
-    <div class="form-group">
-      <label for="email">Email</label>
-      <input class="form-control" id="email" name="email" type="email" placeholder="you@example.com" required>
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input class="form-control" id="password" name="password" type="password" placeholder="Min. 6 characters" required minlength="6">
-    </div>
-    <div class="form-group">
-      <label for="password_confirm">Confirm Password</label>
-      <input class="form-control" id="password_confirm" name="password_confirm" type="password" placeholder="Repeat password" required minlength="6">
-    </div>
-    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem">Create Account</button>
-  </form>
-  <p class="auth-switch">Already have an account? <a href="/login">Sign in</a></p>
-  <a href="https://github.com/eSlider/mail-archive" target="_blank" rel="noopener" class="github-link" style="margin-top:1.5rem;display:inline-flex;align-items:center;gap:0.4rem;color:#6b7280;font-size:0.8rem" title="View on GitHub">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    GitHub
-  </a>
-</div>
-</body>
-</html>`
-
-func registerHTMLWithError(errMsg string) string {
-	return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mail Archive — Register</title>
-<link rel="stylesheet" href="/static/css/app.css">
-</head>
-<body class="login-page">
-<div class="login-container">
-  <h1>Mail Archive</h1>
-  <p class="login-subtitle">Create your account</p>
-  <div class="auth-error">` + errMsg + `</div>
-  <form method="POST" action="/register" class="auth-form">
-    <div class="form-group">
-      <label for="name">Name</label>
-      <input class="form-control" id="name" name="name" type="text" placeholder="Your name" required autofocus>
-    </div>
-    <div class="form-group">
-      <label for="email">Email</label>
-      <input class="form-control" id="email" name="email" type="email" placeholder="you@example.com" required>
-    </div>
-    <div class="form-group">
-      <label for="password">Password</label>
-      <input class="form-control" id="password" name="password" type="password" placeholder="Min. 6 characters" required minlength="6">
-    </div>
-    <div class="form-group">
-      <label for="password_confirm">Confirm Password</label>
-      <input class="form-control" id="password_confirm" name="password_confirm" type="password" placeholder="Repeat password" required minlength="6">
-    </div>
-    <button type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem">Create Account</button>
-  </form>
-  <p class="auth-switch">Already have an account? <a href="/login">Sign in</a></p>
-  <a href="https://github.com/eSlider/mail-archive" target="_blank" rel="noopener" class="github-link" style="margin-top:1.5rem;display:inline-flex;align-items:center;gap:0.4rem;color:#6b7280;font-size:0.8rem" title="View on GitHub">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    GitHub
-  </a>
-</div>
-</body>
-</html>`
-}
-
-const dashboardHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mail Archive</title>
-<link rel="stylesheet" href="/static/css/app.css">
-</head>
-<body>
-<div id="app"></div>
-<script src="/static/js/vendor/jquery-3.7.1.min.js"></script>
-<script src="/static/js/vendor/vue-3.5.13.global.prod.js"></script>
-<script src="/static/js/app/main.js"></script>
-</body>
-</html>`
 
 // --- PST/OST Import ---
 

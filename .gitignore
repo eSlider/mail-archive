@@ -24,7 +24,7 @@ venv/
 
 # Go binaries and build output
 /mails
-search/mail-search
+mail-search
 
 # Index / search data
 data/

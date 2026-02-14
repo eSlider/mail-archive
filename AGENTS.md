@@ -18,7 +18,9 @@ mails/
 │   │   ├── imap/        # IMAP protocol
 │   │   ├── pop3/        # POP3 protocol
 │   │   └── gmail/       # Gmail API
-│   ├── search/
+│   ├── cmd/
+│   │   ├── mails/         # Main app entry
+│   │   └── mail-search/   # Standalone CLI (optional)
 │   │   ├── eml/         # .eml parser
 │   │   ├── index/       # DuckDB + Parquet
 │   │   └── vector/      # Qdrant + Ollama
@@ -78,8 +80,8 @@ Write unit tests using `go test`. Key areas:
 - `internal/user/`: FindOrCreate, directory creation
 - `internal/account/`: CRUD operations, YAML serialization
 - `internal/sync/state.go`: SQLite state tracking
-- `internal/search/eml/`: existing parser tests (migrate from search/)
-- `internal/search/index/`: existing index tests (migrate from search/)
+- `internal/search/eml/`: parser tests
+- `internal/search/index/`: index tests
 - Integration: GreenMail for end-to-end IMAP/POP3 testing
 
 ### 2. Gmail API Sync (Medium Priority)
