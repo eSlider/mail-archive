@@ -152,6 +152,7 @@ internal/web/
 - **No TypeScript** — plain JavaScript (ES6+)
 - **No CDN** — all resources served locally from `web/static/js/vendor/`
 - **No build step** — no webpack, Vite, or transpiler
+- **PWA** — manifest, service worker, and sw-register.js for installability
 
 ### Template Loading
 
@@ -159,9 +160,14 @@ Vue templates are stored as standalone `.vue` files containing raw HTML with Vue
 The app entry point (`main.js`) fetches the template via `fetch()` before mounting:
 
 ```
-web/static/js/app/
-  main.js               # App logic: data, computed, methods, async bootstrap
-  main.template.vue     # Vue template: pure HTML with Vue directives
+web/static/
+  manifest.webmanifest   # PWA manifest (name, icons, theme)
+  sw.js                 # Service worker (offline shell), served at /sw.js
+  js/
+    app/
+      main.js           # App logic: data, computed, methods, async bootstrap
+      main.template.vue  # Vue template: pure HTML with Vue directives
+      sw-register.js    # Registers service worker on all pages
 ```
 
 This approach gives you:
