@@ -31,3 +31,11 @@ Without tini, the main process would be PID 1 and might not reap zombies or hand
 - **Multi-stage** — Builder stage (golang) compiles the binary; runtime stage (debian-slim) ships only the binary and minimal deps.
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md#docker) for usage commands.
+
+## Watch mode (development)
+
+`docker compose watch` rebuilds the mails service when source files change. Exclusions come from `.dockerignore` (users, docs, scripts, \*.md, etc.). Run:
+
+```bash
+docker compose watch
+```

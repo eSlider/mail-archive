@@ -32,19 +32,11 @@ services:
       OLLAMA_URL: "http://172.17.0.1:11434"
       EMBED_MODEL: "all-minilm"
     network_mode: host
+    # docker compose watch — rebuild on changes (uses .dockerignore implicitly)
     develop:
       watch:
         - action: rebuild
           path: .
-          ignore:
-            - .*
-            - users/
-            - data/
-            - docs/
-            - scripts/
-            - emails/
-            - users/
-            - "*.md"
     labels:
       - "service=mail-archive"
     logging:
@@ -64,7 +56,7 @@ services:
     ports:
       - "6333:6333"
       - "6334:6334"
-  
+
   ### Test Environment ###
   # Test IMAP/POP3/SMTP server — use with: docker compose --profile test up
   greenmail:
@@ -73,11 +65,11 @@ services:
     environment:
       GREENMAIL_OPTS: "-Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0 -Dgreenmail.auth.disabled"
     ports:
-      - "3025:3025"   # SMTP
-      - "3110:3110"   # POP3
-      - "3143:3143"   # IMAP
+      - "3025:3025" # SMTP
+      - "3110:3110" # POP3
+      - "3143:3143" # IMAP
     profiles:
-      - test  
+      - test
 
 volumes:
   qdrant_storage:
