@@ -1,0 +1,46 @@
+---
+name: "Deploy Mail Archive (Free Tier)"
+description: "Track deployment and publishing options for the Mail Archive service on free hosting platforms."
+title: "Deploy Mail Archive — Free tier: OpenShift, AWS, Fly.io, etc."
+labels: ["documentation", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue tracks deployment options for the Mail Archive service on free hosting platforms.
+        See [docs/DEPLOYMENT.md](../blob/master/docs/DEPLOYMENT.md) for the full guide.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: "Target platform"
+      description: "Which platform do you want to deploy to?"
+      options:
+        - OpenShift Developer Sandbox
+        - AWS Free Tier (EC2 / ECS)
+        - Fly.io
+        - Railway
+        - Render
+        - Google Cloud
+        - Oracle Cloud
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: "Current status"
+      description: "What is the deployment status?"
+      placeholder: "e.g. Not started / In progress / Blocked / Done"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: "Notes"
+      description: "Any blockers, findings, or documentation gaps."
+      placeholder: "e.g. Need to document Fly.io secret setup..."
+    validations:
+      required: false
