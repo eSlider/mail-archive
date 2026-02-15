@@ -13,6 +13,7 @@ mails/
 ├── cmd/mails/           # Application entry point
 ├── internal/
 │   ├── auth/            # OAuth2 + bcrypt, session management
+│   ├── storage/         # BlobStore (FS or S3) for user data
 │   ├── user/            # User CRUD (users/{uuid}/)
 │   ├── account/         # Per-user email account configs
 │   ├── model/           # Shared types (User, Account, SyncJob)
@@ -22,15 +23,15 @@ mails/
 │   │   ├── gmail/       # Gmail API
 │   │   └── pst/         # PST/OST import
 │   ├── search/
-│   │   ├── eml/         # .eml parser
+│   │   ├── eml/         # .eml parser, CID inline image extraction
 │   │   ├── index/       # DuckDB + Parquet
 │   │   └── vector/      # Qdrant + Ollama
 │   └── web/             # Chi HTTP router + handlers
-├── web/static/          # CSS, JS (Vue.js 3, native fetch)
+├── web/static/          # CSS, JS (Vue.js 3, native fetch), PWA
 ├── internal/web/templates/  # Go HTML templates
-├── users/               # Per-user data (gitignored)
+├── users/               # Per-user data (gitignored; or S3 when env set)
 ├── scripts/             # Legacy Python scripts (reference)
-├── docker-compose.yml
+├── docker-compose.yml   # MinIO (profile s3), GreenMail (profile test)
 ├── Dockerfile
 └── go.mod
 ```
@@ -51,12 +52,14 @@ mails/
 ## Package Dependencies
 
 ```
-cmd → internal/web → internal/sync → internal/model
-                   → internal/auth
+cmd → internal/web → internal/sync   → internal/model
+                   → internal/auth   → internal/storage
                    → internal/user
                    → internal/account
                    → internal/search
 ```
+
+When S3 env vars are set (`S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), BlobStore uses S3 for user.json, accounts.yml, sessions.json, .eml. SQLite and Parquet stay local.
 
 ## Coding Guidelines
 
