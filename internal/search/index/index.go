@@ -2,6 +2,7 @@
 package index
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 	_ "github.com/marcboeker/go-duckdb"
 
 	"github.com/eslider/mails/internal/search/eml"
+	"github.com/eslider/mails/internal/storage"
 )
 
 // reChecksum matches the 16-hex-char checksum prefix in filenames like "a1b2c3d4e5f67890-123.eml".
@@ -23,12 +25,14 @@ var reChecksum = regexp.MustCompile(`^([0-9a-f]{16})-`)
 // Index stores parsed email metadata in a DuckDB in-memory database,
 // persisted to a Parquet file with zstd compression.
 type Index struct {
-	mu        sync.RWMutex
-	db        *sql.DB
-	buildAt   time.Time
-	emailDir  string
-	indexPath string
-	total     int
+	mu           sync.RWMutex
+	db           *sql.DB
+	buildAt      time.Time
+	emailDir     string
+	indexPath    string
+	blobStore    storage.BlobStore
+	emailKeyPref string // key prefix when using blobStore
+	total        int
 }
 
 const createTableSQL = `CREATE TABLE IF NOT EXISTS emails (
@@ -43,7 +47,8 @@ const createTableSQL = `CREATE TABLE IF NOT EXISTS emails (
 
 // New creates a new index. If indexPath points to an existing Parquet file,
 // the index is loaded from it (fast startup).
-func New(emailDir, indexPath string) (*Index, error) {
+// blobStore and usersDir are optional; when set, emails are read from S3.
+func New(emailDir, indexPath string, blobStore storage.BlobStore, usersDir string) (*Index, error) {
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
 		return nil, fmt.Errorf("open duckdb: %w", err)
@@ -54,6 +59,13 @@ func New(emailDir, indexPath string) (*Index, error) {
 		db:        db,
 		emailDir:  emailDir,
 		indexPath: indexPath,
+		blobStore: blobStore,
+	}
+	if blobStore != nil && usersDir != "" {
+		rel, err := filepath.Rel(usersDir, emailDir)
+		if err == nil {
+			idx.emailKeyPref = filepath.ToSlash(rel)
+		}
 	}
 
 	if indexPath != "" {
@@ -129,6 +141,54 @@ func (idx *Index) saveParquet() error {
 	return err
 }
 
+func walkEmailsFromBlobStore(blob storage.BlobStore, prefix string) ([]eml.Email, int) {
+	ctx := context.Background()
+	keys, err := blob.List(ctx, prefix)
+	if err != nil {
+		log.Printf("WARN: list %s: %v", prefix, err)
+		return nil, 0
+	}
+	var parsed []eml.Email
+	var errCount int
+	seen := make(map[string]bool)
+	for _, k := range keys {
+		if !strings.HasSuffix(strings.ToLower(k), ".eml") {
+			continue
+		}
+		name := filepath.Base(k)
+		if cs := extractChecksum(name); cs != "" {
+			if seen[cs] {
+				continue
+			}
+			seen[cs] = true
+		}
+		data, err := blob.Read(ctx, k)
+		if err != nil {
+			log.Printf("WARN: read %s: %v", k, err)
+			errCount++
+			continue
+		}
+		relPath := k
+		if strings.HasPrefix(k, prefix+"/") {
+			relPath = k[len(prefix)+1:]
+		} else if strings.HasPrefix(k, prefix) {
+			relPath = k[len(prefix):]
+			if relPath != "" && relPath[0] == '/' {
+				relPath = relPath[1:]
+			}
+		}
+		e, parseErr := eml.ParseBytes(relPath, data)
+		if parseErr != nil {
+			log.Printf("WARN: parse %s: %v", k, parseErr)
+			errCount++
+			continue
+		}
+		e.Path = filepath.ToSlash(relPath)
+		parsed = append(parsed, e)
+	}
+	return parsed, errCount
+}
+
 // WalkEmails walks the email directory, parses .eml files, and returns
 // deduplicated emails by checksum.
 func WalkEmails(emailDir string) ([]eml.Email, int) {
@@ -164,10 +224,16 @@ func WalkEmails(emailDir string) ([]eml.Email, int) {
 	return parsed, errCount
 }
 
-// Build walks the email directory, parses every .eml file, stores them in
-// DuckDB and exports to Parquet with zstd.
+// Build walks the email directory (or S3 prefix), parses every .eml file,
+// stores them in DuckDB and exports to Parquet with zstd.
 func (idx *Index) Build() (int, int) {
-	parsed, errCount := WalkEmails(idx.emailDir)
+	var parsed []eml.Email
+	var errCount int
+	if idx.blobStore != nil && idx.emailKeyPref != "" {
+		parsed, errCount = walkEmailsFromBlobStore(idx.blobStore, idx.emailKeyPref)
+	} else {
+		parsed, errCount = WalkEmails(idx.emailDir)
+	}
 
 	idx.mu.Lock()
 	defer idx.mu.Unlock()

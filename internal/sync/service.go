@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/eslider/mails/internal/account"
 	"github.com/eslider/mails/internal/model"
 	"github.com/eslider/mails/internal/search/index"
+	"github.com/eslider/mails/internal/storage"
 	sync_gmail "github.com/eslider/mails/internal/sync/gmail"
 	sync_imap "github.com/eslider/mails/internal/sync/imap"
 	sync_pop3 "github.com/eslider/mails/internal/sync/pop3"
@@ -27,18 +29,20 @@ type syncEntry struct {
 
 // Service orchestrates email sync for all accounts of a user.
 type Service struct {
-	mu       sync.Mutex
-	usersDir string
-	accounts *account.Store
-	running  map[string]*syncEntry // accountID -> entry
+	mu        sync.Mutex
+	usersDir  string
+	accounts  *account.Store
+	blobStore storage.BlobStore
+	running   map[string]*syncEntry // accountID -> entry
 }
 
-// NewService creates a sync service.
-func NewService(usersDir string, accounts *account.Store) *Service {
+// NewService creates a sync service. blobStore may be nil to use local filesystem only.
+func NewService(usersDir string, accounts *account.Store, blobStore storage.BlobStore) *Service {
 	return &Service{
-		usersDir: usersDir,
-		accounts: accounts,
-		running:  make(map[string]*syncEntry),
+		usersDir:  usersDir,
+		accounts:  accounts,
+		blobStore: blobStore,
+		running:   make(map[string]*syncEntry),
 	}
 }
 
@@ -111,7 +115,8 @@ func (s *Service) SyncAccount(userID, accountID string) error {
 		}()
 
 		s.setProgress(accountID, "syncing", "")
-		newMsgs, syncErr := s.doSync(ctx, *acct, emailDir, stateDB, accountID)
+		saveFn := s.makeSaveEmailFunc()
+		newMsgs, syncErr := s.doSync(ctx, *acct, emailDir, stateDB, accountID, saveFn)
 
 		// Stop live indexing and wait for it to fully exit before final rebuild.
 		indexCancel()
@@ -233,7 +238,33 @@ func (s *Service) setProgress(accountID, progress, lastError string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) doSync(ctx context.Context, acct model.EmailAccount, emailDir string, stateDB *StateDB, accountID string) (int, error) {
+func (s *Service) makeSaveEmailFunc() sync_imap.SaveEmailFunc {
+	if s.blobStore == nil {
+		return nil
+	}
+	return func(path string, data []byte) error {
+		rel, err := filepath.Rel(s.usersDir, path)
+		if err != nil {
+			return err
+		}
+		return s.blobStore.Write(context.Background(), filepath.ToSlash(rel), data)
+	}
+}
+
+func (s *Service) makePstSaveFunc() sync_pst.SaveEmailFunc {
+	if s.blobStore == nil {
+		return nil
+	}
+	return sync_pst.SaveEmailFunc(func(path string, data []byte) error {
+		rel, err := filepath.Rel(s.usersDir, path)
+		if err != nil {
+			return err
+		}
+		return s.blobStore.Write(context.Background(), filepath.ToSlash(rel), data)
+	})
+}
+
+func (s *Service) doSync(ctx context.Context, acct model.EmailAccount, emailDir string, stateDB *StateDB, accountID string, saveFn sync_imap.SaveEmailFunc) (int, error) {
 	// Progress callback: update in-memory progress visible via API.
 	onProgress := func(msg string) {
 		s.setProgress(accountID, msg, "")
@@ -241,11 +272,11 @@ func (s *Service) doSync(ctx context.Context, acct model.EmailAccount, emailDir 
 
 	switch acct.Type {
 	case model.AccountTypeIMAP:
-		return sync_imap.SyncWithContext(ctx, acct, emailDir, stateDB, onProgress)
+		return sync_imap.SyncWithContext(ctx, acct, emailDir, stateDB, onProgress, saveFn)
 	case model.AccountTypePOP3:
-		return sync_pop3.SyncWithContext(ctx, acct, emailDir, stateDB)
+		return sync_pop3.SyncWithContext(ctx, acct, emailDir, stateDB, sync_pop3.SaveEmailFunc(saveFn))
 	case model.AccountTypeGmailAPI:
-		return sync_gmail.SyncWithContext(ctx, acct, emailDir, stateDB)
+		return sync_gmail.SyncWithContext(ctx, acct, emailDir, stateDB, sync_gmail.SaveEmailFunc(saveFn))
 	default:
 		return 0, fmt.Errorf("unsupported account type: %s", acct.Type)
 	}
@@ -268,7 +299,7 @@ func (s *Service) liveIndex(ctx context.Context, emailDir, indexPath, accountID 
 }
 
 func (s *Service) rebuildIndex(emailDir, indexPath string) {
-	idx, err := index.New(emailDir, indexPath)
+	idx, err := index.New(emailDir, indexPath, s.blobStore, s.usersDir)
 	if err != nil {
 		log.Printf("WARN: live index open: %v", err)
 		return
@@ -297,17 +328,20 @@ func (s *Service) ImportPST(userID, accountID, pstPath string, onProgress sync_p
 	}
 
 	emailDir := account.EmailDir(s.usersDir, userID, *acct)
-	if err := os.MkdirAll(emailDir, 0o755); err != nil {
-		return 0, 0, fmt.Errorf("create email dir: %w", err)
+	if s.blobStore == nil {
+		if err := os.MkdirAll(emailDir, 0o755); err != nil {
+			return 0, 0, fmt.Errorf("create email dir: %w", err)
+		}
 	}
 
-	extracted, errCount, importErr := sync_pst.Import(pstPath, emailDir, onProgress)
+	saveFn := s.makePstSaveFunc()
+	extracted, errCount, importErr := sync_pst.Import(pstPath, emailDir, onProgress, saveFn)
 	if importErr != nil {
 		return extracted, errCount, fmt.Errorf("PST import: %w", importErr)
 	}
 
 	indexPath := account.IndexPath(s.usersDir, userID, *acct)
-	idx, idxErr := index.New(emailDir, indexPath)
+	idx, idxErr := index.New(emailDir, indexPath, s.blobStore, s.usersDir)
 	if idxErr != nil {
 		return extracted, errCount, fmt.Errorf("index: %w", idxErr)
 	}

@@ -99,6 +99,8 @@ To enable OAuth login, configure one or more providers:
 
 ## User Data Layout
 
+When S3 env vars are set, `user.json`, `accounts.yml`, `sessions.json`, and `.eml` files are stored in S3. SQLite and Parquet stay on the local filesystem.
+
 ```
 users/
   019c56a4-a9ef-79bd-b53a-ef7a080d9c90/
@@ -122,6 +124,7 @@ users/
 cmd/mails/         → Entry point, CLI (serve, fix-dates, version)
 internal/
   auth/            → OAuth2 (GitHub, Google, Facebook), sessions
+  storage/         → Blob store (FS or S3) for user data
   user/            → User storage (users/{uuid}/)
   account/         → Email account CRUD (accounts.yml)
   model/           → Shared types (User, Account, SyncJob)
@@ -244,11 +247,23 @@ web/static/
     sw-register.js                   # Service worker registration
 ```
 
+## S3 Storage (Optional)
+
+Store user data on S3 when `S3_ENDPOINT` and credentials are set:
+
+```bash
+docker compose --profile s3 up -d minio
+export S3_ENDPOINT=http://localhost:9900
+export S3_ACCESS_KEY_ID=minioadmin
+export S3_SECRET_ACCESS_KEY=minioadmin
+export S3_BUCKET=mails
+export S3_USE_SSL=false
+./mails serve
+```
+
 ## Todo
 
-- **Storage backend** — S3 (AWS/Minio) or pluggable local filesystem
-
-See (TODO's)[TODO.md]
+See [TODO.md](TODO.md)
 
 ## Ideas
 

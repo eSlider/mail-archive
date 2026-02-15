@@ -1,7 +1,9 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"github.com/eslider/mails/internal/model"
 	"github.com/eslider/mails/internal/search/eml"
 	"github.com/eslider/mails/internal/search/index"
+	"github.com/eslider/mails/internal/storage"
 	"github.com/eslider/mails/internal/sync"
 	sync_pst "github.com/eslider/mails/internal/sync/pst"
 	"github.com/eslider/mails/internal/user"
@@ -407,7 +410,7 @@ func handleSearch(cfg Config) http.HandlerFunc {
 				if a.ID == accountFilter {
 					emailDir := account.EmailDir(cfg.UsersDir, userID, a)
 					indexPath := account.IndexPath(cfg.UsersDir, userID, a)
-					idx, err := index.New(emailDir, indexPath)
+					idx, err := index.New(emailDir, indexPath, cfg.BlobStore, cfg.UsersDir)
 					if err != nil {
 						writeError(w, http.StatusInternalServerError, "index error: "+err.Error())
 						return
@@ -492,14 +495,35 @@ func handleEmailDetail(cfg Config) http.HandlerFunc {
 		}
 
 		full := filepath.Join(emailDir, cleaned)
-		fe, err := eml.ParseFileFull(full)
+		data, err := readEmailBytes(cfg, full)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "email not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to read email")
+			return
+		}
+		fe, err := eml.ParseFileFullFromBytes(cleaned, data)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "email not found")
 			return
 		}
-		fe.Path = cleaned
 		writeJSON(w, http.StatusOK, fe)
 	}
+}
+
+// readEmailBytes returns email content by full path. Uses BlobStore when configured.
+func readEmailBytes(cfg Config, fullPath string) ([]byte, error) {
+	if cfg.BlobStore != nil {
+		rel, err := filepath.Rel(cfg.UsersDir, fullPath)
+		if err != nil {
+			return nil, err
+		}
+		key := filepath.ToSlash(rel)
+		return cfg.BlobStore.Read(context.Background(), key)
+	}
+	return os.ReadFile(fullPath)
 }
 
 // resolveEmailPath returns the full filesystem path for an email from path + account_id query params.
@@ -539,20 +563,19 @@ func handleEmailDownload(cfg Config) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "missing or invalid path")
 			return
 		}
-		if _, err := os.Stat(full); err != nil {
-			writeError(w, http.StatusNotFound, "email not found")
+		data, err := readEmailBytes(cfg, full)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "email not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to read email")
 			return
 		}
 		name := filepath.Base(full)
 		w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 		w.Header().Set("Content-Type", "message/rfc822")
-		f, err := os.Open(full)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to read email")
-			return
-		}
-		defer f.Close()
-		io.Copy(w, f)
+		w.Write(data)
 	}
 }
 
@@ -563,12 +586,21 @@ func handleAttachmentDownload(cfg Config) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "missing or invalid path")
 			return
 		}
-		index := queryInt(r, "index", -1)
-		if index < 0 {
+		emailData, err := readEmailBytes(cfg, full)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "attachment not found")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to read email")
+			return
+		}
+		idx := queryInt(r, "index", -1)
+		if idx < 0 {
 			writeError(w, http.StatusBadRequest, "missing or invalid index parameter")
 			return
 		}
-		data, contentType, filename, err := eml.ExtractAttachment(full, index)
+		data, contentType, filename, err := eml.ExtractAttachmentFromBytes(emailData, idx)
 		if err != nil {
 			writeError(w, http.StatusNotFound, "attachment not found")
 			return
@@ -640,7 +672,7 @@ func handleReindex(cfg Config) http.HandlerFunc {
 			for _, acct := range accts {
 				emailDir := account.EmailDir(cfg.UsersDir, userID, acct)
 				indexPath := account.IndexPath(cfg.UsersDir, userID, acct)
-				idx, err := index.New(emailDir, indexPath)
+				idx, err := index.New(emailDir, indexPath, cfg.BlobStore, cfg.UsersDir)
 				if err != nil {
 					log.Printf("WARN: reindex %s: %v", acct.Email, err)
 					continue

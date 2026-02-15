@@ -62,7 +62,7 @@ func TestImportFromDataFiles(t *testing.T) {
 				progressCalls++
 			}
 
-			extracted, errCount, importErr := Import(pstPath, emailDir, onProgress)
+			extracted, errCount, importErr := Import(pstPath, emailDir, onProgress, nil)
 			if importErr != nil {
 				if strings.Contains(importErr.Error(), "readpst not installed") {
 					t.Skipf("go-pst failed and readpst fallback unavailable: %v (install pst-utils to test OST)", importErr)
@@ -140,7 +140,7 @@ func TestImportExtractionWorks(t *testing.T) {
 	}
 
 	emailDir := t.TempDir()
-	extracted, errCount, err := Import(pstPath, emailDir, func(phase string, current, total int) {})
+	extracted, errCount, err := Import(pstPath, emailDir, func(phase string, current, total int) {}, nil)
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}

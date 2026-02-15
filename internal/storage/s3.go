@@ -164,5 +164,31 @@ func (c *S3Client) Get(ctx context.Context, key string) ([]byte, error) {
 	return io.ReadAll(out.Body)
 }
 
+// List lists object keys with the given prefix.
+func (c *S3Client) List(ctx context.Context, prefix string) ([]string, error) {
+	var keys []string
+	var contToken *string
+	for {
+		out, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+			Bucket:            aws.String(c.bucket),
+			Prefix:            aws.String(prefix),
+			ContinuationToken: contToken,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, obj := range out.Contents {
+			if obj.Key != nil {
+				keys = append(keys, *obj.Key)
+			}
+		}
+		if !aws.ToBool(out.IsTruncated) {
+			break
+		}
+		contToken = out.NextContinuationToken
+	}
+	return keys, nil
+}
+
 // ErrNotFound is returned when an object does not exist.
 var ErrNotFound = errors.New("object not found")

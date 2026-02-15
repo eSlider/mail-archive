@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/eslider/mails/internal/model"
+	"github.com/eslider/mails/internal/storage"
 )
 
 const (
@@ -20,21 +22,25 @@ const (
 	sessionsFile  = "sessions.json"
 )
 
-// SessionStore manages user sessions backed by a JSON file.
+// SessionStore manages user sessions backed by a JSON file or S3.
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]model.Session // token -> session
-	dataDir  string
+	mu        sync.RWMutex
+	sessions  map[string]model.Session // token -> session
+	dataDir   string
+	blobStore storage.BlobStore
 }
 
-// NewSessionStore creates a session store, loading existing sessions from disk.
-func NewSessionStore(dataDir string) (*SessionStore, error) {
+// NewSessionStore creates a session store. blobStore may be nil to use local filesystem.
+func NewSessionStore(dataDir string, blobStore storage.BlobStore) (*SessionStore, error) {
 	s := &SessionStore{
-		sessions: make(map[string]model.Session),
-		dataDir:  dataDir,
+		sessions:  make(map[string]model.Session),
+		dataDir:   dataDir,
+		blobStore: blobStore,
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, err
+	if blobStore == nil {
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return nil, err
+		}
 	}
 	s.load()
 	return s, nil
@@ -133,6 +139,23 @@ func generateToken() (string, error) {
 }
 
 func (s *SessionStore) load() {
+	if s.blobStore != nil {
+		data, err := s.blobStore.Read(context.Background(), sessionsFile)
+		if err != nil {
+			return
+		}
+		var sessions []model.Session
+		if err := json.Unmarshal(data, &sessions); err != nil {
+			return
+		}
+		now := time.Now()
+		for _, sess := range sessions {
+			if now.Before(sess.ExpiresAt) {
+				s.sessions[sess.Token] = sess
+			}
+		}
+		return
+	}
 	path := filepath.Join(s.dataDir, sessionsFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -160,6 +183,10 @@ func (s *SessionStore) save() {
 
 	data, err := json.MarshalIndent(sessions, "", "  ")
 	if err != nil {
+		return
+	}
+	if s.blobStore != nil {
+		s.blobStore.Write(context.Background(), sessionsFile, data)
 		return
 	}
 	path := filepath.Join(s.dataDir, sessionsFile)

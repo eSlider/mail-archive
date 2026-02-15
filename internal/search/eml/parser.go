@@ -109,6 +109,35 @@ func ParseFile(path string) (Email, error) {
 	}, nil
 }
 
+// ParseBytes parses .eml content from bytes. path is the logical path for the result.
+func ParseBytes(path string, data []byte) (Email, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return Email{}, fmt.Errorf("parse: %w", err)
+	}
+	h := msg.Header
+	date, _ := h.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
+	subject := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Subject"))))
+	from := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("From"))))
+	to := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("To"))))
+	bodyText := extractBodyText(h.Get("Content-Type"), h.Get("Content-Transfer-Encoding"), msg.Body)
+	return Email{
+		Path:     path,
+		Subject:  subject,
+		From:     from,
+		To:       to,
+		Date:     date,
+		Size:     int64(len(data)),
+		BodyText: bodyText,
+	}, nil
+}
+
 // parseDateFuzzy tries multiple date layouts to handle non-standard Date headers
 // (e.g. missing timezone, unconventional formats).
 func parseDateFuzzy(raw string) time.Time {
@@ -435,6 +464,36 @@ func ParseFileFull(path string) (FullEmail, error) {
 	return fe, nil
 }
 
+// ParseFileFullFromBytes parses .eml content from bytes. path is the logical path for the result.
+func ParseFileFullFromBytes(path string, data []byte) (FullEmail, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return FullEmail{}, fmt.Errorf("parse: %w", err)
+	}
+	h := msg.Header
+	date, _ := h.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
+	fe := FullEmail{
+		Path:    path,
+		Subject: ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Subject")))),
+		From:    ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("From")))),
+		To:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("To")))),
+		CC:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Cc")))),
+		ReplyTo: ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Reply-To")))),
+		Date:   date,
+		Size:   int64(len(data)),
+	}
+	ct := h.Get("Content-Type")
+	cte := h.Get("Content-Transfer-Encoding")
+	extractFullBody(ct, cte, msg.Body, &fe)
+	return fe, nil
+}
+
 func extractFullBody(contentType, transferEncoding string, body io.Reader, fe *FullEmail) {
 	if contentType == "" {
 		contentType = "text/plain"
@@ -623,15 +682,18 @@ func extractPartByCID(mr *multipart.Reader, targetCID string, outData *[]byte, o
 // ExtractAttachment reads the Nth attachment (0-based index) from an .eml file.
 // Returns the raw bytes, content-type, filename, and any error.
 func ExtractAttachment(path string, index int) ([]byte, string, string, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	return ExtractAttachmentFromBytes(data, index)
+}
 
-	msg, err := mail.ReadMessage(bufio.NewReader(f))
+// ExtractAttachmentFromBytes extracts the Nth attachment from .eml content.
+func ExtractAttachmentFromBytes(data []byte, index int) ([]byte, string, string, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
 	if err != nil {
-		return nil, "", "", fmt.Errorf("parse %s: %w", path, err)
+		return nil, "", "", fmt.Errorf("parse: %w", err)
 	}
 
 	ct := msg.Header.Get("Content-Type")
@@ -650,15 +712,15 @@ func ExtractAttachment(path string, index int) ([]byte, string, string, error) {
 		return nil, "", "", fmt.Errorf("multipart missing boundary")
 	}
 
-	var data []byte
+	var outData []byte
 	var contentType, filename string
 	var found bool
 	var idx int
-	extractPartByIndex(multipart.NewReader(msg.Body, boundary), index, &idx, &data, &contentType, &filename, &found)
+	extractPartByIndex(multipart.NewReader(msg.Body, boundary), index, &idx, &outData, &contentType, &filename, &found)
 	if !found {
 		return nil, "", "", fmt.Errorf("attachment index %d out of range", index)
 	}
-	return data, contentType, filename, nil
+	return outData, contentType, filename, nil
 }
 
 func extractPartByIndex(mr *multipart.Reader, targetIndex int, currentIndex *int, outData *[]byte, outContentType, outFilename *string, found *bool) {

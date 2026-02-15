@@ -86,7 +86,7 @@ func TestIndex_BuildAndStats(t *testing.T) {
 	dir := seedSyntheticEmails(t)
 	indexPath := filepath.Join(t.TempDir(), "index.parquet")
 
-	idx, err := index.New(dir, indexPath)
+	idx, err := index.New(dir, indexPath, nil, "")
 	if err != nil {
 		t.Fatalf("create index: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestIndex_BuildAndStats(t *testing.T) {
 func TestIndex_KeywordSearch(t *testing.T) {
 	// Case: Search by keywords present in subject or body.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestIndex_KeywordSearch(t *testing.T) {
 func TestIndex_NoMatch(t *testing.T) {
 	// Case: Search for a term that exists in no email -> 0 hits.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestIndex_NoMatch(t *testing.T) {
 func TestIndex_EmptyQueryReturnsAll(t *testing.T) {
 	// Case: Empty string query returns all indexed emails.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestIndex_EmptyQueryReturnsAll(t *testing.T) {
 func TestIndex_Pagination(t *testing.T) {
 	// Case: Paginate results without overlap or omission.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestIndex_Pagination(t *testing.T) {
 func TestIndex_DateOrdering(t *testing.T) {
 	// Case: Empty query results are ordered by date DESC (newest first).
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestIndex_ParquetRoundTrip(t *testing.T) {
 	indexPath := filepath.Join(t.TempDir(), "test_index.parquet")
 
 	// Build and export.
-	idx1, err := index.New(dir, indexPath)
+	idx1, err := index.New(dir, indexPath, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestIndex_ParquetRoundTrip(t *testing.T) {
 	t.Logf("Parquet file: %d bytes", info.Size())
 
 	// Re-open from Parquet (no rebuild needed).
-	idx2, err := index.New(dir, indexPath)
+	idx2, err := index.New(dir, indexPath, nil, "")
 	if err != nil {
 		t.Fatalf("re-open from parquet: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestIndex_ParquetRoundTrip(t *testing.T) {
 func TestIndex_Rebuild(t *testing.T) {
 	// Case: Rebuild replaces stale index with fresh data from disk.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestIndex_Deduplication(t *testing.T) {
 		"Tue, 02 Jan 2024 09:00:00 +0000",
 		"This is a unique message.")
 
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestIndex_Deduplication(t *testing.T) {
 func TestIndex_SearchWithSnippet(t *testing.T) {
 	// Case: Search results include a context snippet around the matched keyword.
 	dir := seedSyntheticEmails(t)
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

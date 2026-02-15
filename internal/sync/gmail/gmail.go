@@ -16,10 +16,13 @@ type SyncState interface {
 	MarkUIDSynced(accountID, folder, uid string) error
 }
 
+// SaveEmailFunc saves email data by full path. If nil, os.WriteFile is used.
+type SaveEmailFunc func(path string, data []byte) error
+
 // Sync downloads new emails from a Gmail account via the Gmail API.
 // Returns (newMessages, error). NEVER deletes messages from the server.
 func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
-	return SyncWithContext(context.Background(), acct, emailDir, state)
+	return SyncWithContext(context.Background(), acct, emailDir, state, nil)
 }
 
 // SyncWithContext downloads new emails with cancellation support.
@@ -28,7 +31,7 @@ func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error
 // and google.golang.org/api/gmail/v1. For now, this is a stub that
 // returns an error indicating it needs implementation with proper
 // OAuth2 credentials.
-func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState, saveFn SaveEmailFunc) (int, error) {
 	log.Printf("Gmail API: sync for %s (stub — not yet implemented)", acct.Email)
 
 	// Gmail API sync requires:

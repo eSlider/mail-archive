@@ -11,6 +11,7 @@ import (
 
 	"github.com/eslider/mails/internal/account"
 	"github.com/eslider/mails/internal/auth"
+	"github.com/eslider/mails/internal/storage"
 	"github.com/eslider/mails/internal/sync"
 	"github.com/eslider/mails/internal/user"
 )
@@ -27,12 +28,13 @@ var TemplateDir string
 
 // Config holds dependencies for the web layer.
 type Config struct {
-	Users    *user.Store
-	Accounts *account.Store
-	Sessions *auth.SessionStore
-	Auth     *auth.Providers
-	Sync     *sync.Service
-	UsersDir string
+	Users     *user.Store
+	Accounts  *account.Store
+	Sessions  *auth.SessionStore
+	Auth      *auth.Providers
+	Sync      *sync.Service
+	UsersDir  string
+	BlobStore storage.BlobStore
 
 	// Search (optional — per-user indices are loaded on demand).
 	QdrantURL  string

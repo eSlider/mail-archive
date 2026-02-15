@@ -293,7 +293,7 @@ func TestIMAPSyncThenIndexAndSearch(t *testing.T) {
 
 	// Step 2: Build the search index.
 	indexPath := filepath.Join(emailDir, "index.parquet")
-	idx, err := index.New(emailDir, indexPath)
+	idx, err := index.New(emailDir, indexPath, nil, "")
 	if err != nil {
 		t.Fatalf("create index: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestPOP3SyncThenIndexAndSearch(t *testing.T) {
 	// Step 2: Build index over inbox/.
 	inboxDir := filepath.Join(emailDir, "inbox")
 	indexPath := filepath.Join(emailDir, "index.parquet")
-	idx, err := index.New(inboxDir, indexPath)
+	idx, err := index.New(inboxDir, indexPath, nil, "")
 	if err != nil {
 		t.Fatalf("create index: %v", err)
 	}
