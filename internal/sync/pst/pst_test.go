@@ -186,7 +186,57 @@ func TestImportExtractionWorks(t *testing.T) {
 		}
 	}
 
+	// Verify .vcf, .ics, .txt formats when present.
+	verifyNonEmailFormats(t, emailDir)
+
 	t.Logf("extracted %d items (eml/vcf/ics/txt), %d errors", extracted, errCount)
+}
+
+// verifyNonEmailFormats checks that extracted .vcf, .ics, .txt files have valid content.
+func verifyNonEmailFormats(t *testing.T, emailDir string) {
+	var vcfCount, icsCount, txtCount int
+	filepath.Walk(emailDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		ext := strings.ToLower(filepath.Ext(path))
+		switch ext {
+		case ".vcf":
+			vcfCount++
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Errorf("read .vcf %s: %v", path, err)
+				return nil
+			}
+			if !containsAll(body, "BEGIN:VCARD", "END:VCARD") {
+				t.Errorf(".vcf %s missing vCard markers", path)
+			}
+		case ".ics":
+			icsCount++
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Errorf("read .ics %s: %v", path, err)
+				return nil
+			}
+			if !containsAll(body, "BEGIN:VCALENDAR", "END:VCALENDAR", "BEGIN:VEVENT", "END:VEVENT") {
+				t.Errorf(".ics %s missing iCalendar markers", path)
+			}
+		case ".txt":
+			txtCount++
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Errorf("read .txt %s: %v", path, err)
+				return nil
+			}
+			if len(body) == 0 {
+				t.Errorf(".txt %s is empty", path)
+			}
+		}
+		return nil
+	})
+	if vcfCount+icsCount+txtCount > 0 {
+		t.Logf("verified formats: %d .vcf, %d .ics, %d .txt", vcfCount, icsCount, txtCount)
+	}
 }
 
 func containsAll(b []byte, subs ...string) bool {
