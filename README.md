@@ -79,6 +79,11 @@ docker pull ghcr.io/eslider/mail-archive:v1.0.1
 | `QDRANT_URL`             | —                       | Qdrant gRPC address for similarity search |
 | `OLLAMA_URL`             | —                       | Ollama API URL for embeddings             |
 | `EMBED_MODEL`            | `all-minilm`            | Embedding model name                      |
+| `S3_ENDPOINT`            | —                       | S3-compatible storage endpoint (e.g. MinIO) |
+| `S3_ACCESS_KEY_ID`       | —                       | S3 access key                             |
+| `S3_SECRET_ACCESS_KEY`   | —                       | S3 secret key                             |
+| `S3_BUCKET`              | `mails`                 | S3 bucket name                            |
+| `S3_USE_SSL`             | `true`                  | Use HTTPS for S3 endpoint                 |
 
 ### OAuth Setup (Optional)
 
@@ -152,6 +157,10 @@ go test ./...
 # Run e2e tests (requires GreenMail + Qdrant + Ollama)
 docker compose --profile test up -d greenmail
 go test -tags e2e -v ./tests/e2e/
+
+# Run S3 storage integration tests (requires MinIO)
+docker compose --profile s3 up -d minio
+S3_ENDPOINT=http://localhost:9900 S3_ACCESS_KEY_ID=minioadmin S3_SECRET_ACCESS_KEY=minioadmin S3_BUCKET=mails-test S3_USE_SSL=false go test -v ./internal/storage/
 
 # Docker dev mode (auto-rebuild on changes)
 docker compose watch
