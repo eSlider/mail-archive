@@ -314,3 +314,127 @@ func TestParquetPersistence(t *testing.T) {
 		t.Errorf("search 'trampoline' after reload = %d, want 1", res.Total)
 	}
 }
+
+func TestSearchMultiDeduplicatesByChecksum(t *testing.T) {
+	// Simulate re-imported PST: two accounts with same emails (same content = same checksum).
+	// SearchMulti should deduplicate so each email appears once.
+	root := t.TempDir()
+
+	// Account 1: inbox with checksum-named emails
+	dir1 := filepath.Join(root, "pst-import-1")
+	inbox1 := filepath.Join(dir1, "inbox")
+	if err := os.MkdirAll(inbox1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	eml1 := "From: a@b.com\r\nTo: c@d.com\r\nSubject: Re-import Test\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\nContent-Type: text/plain\r\n\r\nSame content in both imports.\r\n"
+	os.WriteFile(filepath.Join(inbox1, "a1b2c3d4e5f60001-1.eml"), []byte(eml1), 0644)
+	eml2 := "From: x@y.com\r\nTo: z@w.com\r\nSubject: Unique One\r\nDate: Tue, 11 Feb 2025 08:00:00 +0000\r\nContent-Type: text/plain\r\n\r\nOnly in first.\r\n"
+	os.WriteFile(filepath.Join(inbox1, "bbbb111122223333-2.eml"), []byte(eml2), 0644)
+
+	// Account 2: same emails (re-imported PST) — different paths, same checksums
+	dir2 := filepath.Join(root, "pst-import-2")
+	inbox2 := filepath.Join(dir2, "inbox")
+	if err := os.MkdirAll(inbox2, 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(inbox2, "a1b2c3d4e5f60001-1.eml"), []byte(eml1), 0644)  // same checksum
+	os.WriteFile(filepath.Join(inbox2, "bbbb111122223333-99.eml"), []byte(eml2), 0644) // same checksum
+
+	parquet1 := filepath.Join(root, "idx1.parquet")
+	parquet2 := filepath.Join(root, "idx2.parquet")
+
+	idx1, err := index.New(dir1, parquet1)
+	if err != nil {
+		t.Fatalf("index.New 1: %v", err)
+	}
+	idx1.Build()
+	idx1.Close()
+
+	idx2, err := index.New(dir2, parquet2)
+	if err != nil {
+		t.Fatalf("index.New 2: %v", err)
+	}
+	idx2.Build()
+	idx2.Close()
+
+	// SearchMulti across both accounts — should deduplicate by checksum
+	accounts := []index.AccountIndex{
+		{ID: "acct-1", IndexPath: parquet1},
+		{ID: "acct-2", IndexPath: parquet2},
+	}
+	result := index.SearchMulti(accounts, "", 0, 100)
+
+	// 2 unique emails, not 4 (2 per account)
+	if result.Total != 2 {
+		t.Errorf("SearchMulti total = %d, want 2 (deduplicated)", result.Total)
+	}
+	if len(result.Hits) != 2 {
+		t.Errorf("SearchMulti hits = %d, want 2", len(result.Hits))
+	}
+	t.Logf("SearchMulti: 4 rows across 2 accounts -> %d unique (deduplicated)", result.Total)
+}
+
+func TestSearchMultiKeepsAllWhenNoChecksumInPath(t *testing.T) {
+	// Paths without checksum format: content fingerprint used for dedup.
+	// Single account with 3 different emails -> 3 results.
+	root := t.TempDir()
+
+	dir := filepath.Join(root, "readpst-style")
+	inbox := filepath.Join(dir, "inbox")
+	if err := os.MkdirAll(inbox, 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(inbox, "message_1.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 1\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 1"), 0644)
+	os.WriteFile(filepath.Join(inbox, "message_2.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 2\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 2"), 0644)
+	os.WriteFile(filepath.Join(inbox, "message_3.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 3\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 3"), 0644)
+
+	parquetPath := filepath.Join(root, "idx.parquet")
+	idx, err := index.New(dir, parquetPath)
+	if err != nil {
+		t.Fatalf("index.New: %v", err)
+	}
+	idx.Build()
+	idx.Close()
+
+	accounts := []index.AccountIndex{{ID: "acct-1", IndexPath: parquetPath}}
+	result := index.SearchMulti(accounts, "", 0, 100)
+
+	if result.Total != 3 {
+		t.Errorf("SearchMulti total = %d, want 3", result.Total)
+	}
+}
+
+func TestSearchMultiDeduplicatesByContentWhenNoChecksumInPath(t *testing.T) {
+	// Two accounts (re-imported PST via readpst) with same emails -> content fingerprint dedupes.
+	root := t.TempDir()
+
+	eml1 := "From: a@b.com\r\nTo: c@d.com\r\nSubject: Same\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody"
+	eml2 := "From: x@y.com\r\nTo: z@w.com\r\nSubject: Other\r\nDate: Tue, 11 Feb 2025 08:00:00 +0000\r\n\r\nDifferent"
+
+	for _, acc := range []string{"import-1", "import-2"} {
+		dir := filepath.Join(root, acc)
+		inbox := filepath.Join(dir, "inbox")
+		if err := os.MkdirAll(inbox, 0755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(inbox, "message_1.eml"), []byte(eml1), 0644)
+		os.WriteFile(filepath.Join(inbox, "message_2.eml"), []byte(eml2), 0644)
+	}
+
+	idx1, _ := index.New(filepath.Join(root, "import-1"), filepath.Join(root, "idx1.parquet"))
+	idx1.Build()
+	idx1.Close()
+	idx2, _ := index.New(filepath.Join(root, "import-2"), filepath.Join(root, "idx2.parquet"))
+	idx2.Build()
+	idx2.Close()
+
+	accounts := []index.AccountIndex{
+		{ID: "acct-1", IndexPath: filepath.Join(root, "idx1.parquet")},
+		{ID: "acct-2", IndexPath: filepath.Join(root, "idx2.parquet")},
+	}
+	result := index.SearchMulti(accounts, "", 0, 100)
+
+	if result.Total != 2 {
+		t.Errorf("SearchMulti total = %d, want 2 (deduplicated by content when no checksum in path)", result.Total)
+	}
+}

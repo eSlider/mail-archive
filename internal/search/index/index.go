@@ -295,7 +295,26 @@ func SearchMulti(accounts []AccountIndex, query string, offset, limit int) Searc
 		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
 	}
 
-	createSQL := "CREATE TEMP TABLE emails AS " + strings.Join(unionParts, " UNION ALL ")
+	// Build raw union first.
+	rawUnion := strings.Join(unionParts, " UNION ALL ")
+	// Deduplicate: same email in multiple accounts (e.g. re-imported PST) appears once.
+	// - Path with checksum (go-pst): use checksum for dedup.
+	// - Path without checksum (readpst): use content fingerprint (subject|from|to|date|body).
+	// NULLIF ensures regexp_extract '' is treated as NULL for fallback.
+	createSQL := `CREATE TEMP TABLE emails AS
+		SELECT account_id, path, subject, from_addr, to_addr, date, size, body_text
+		FROM (
+			SELECT *,
+				ROW_NUMBER() OVER (
+					PARTITION BY COALESCE(
+						NULLIF(regexp_extract(path, '([0-9a-f]{16})-', 1), ''),
+						subject || '|' || COALESCE(from_addr, '') || '|' || COALESCE(to_addr, '') || '|' || COALESCE(CAST(date AS VARCHAR), '') || '|' || COALESCE(body_text, '')
+					)
+					ORDER BY date DESC NULLS LAST
+				) AS rn
+			FROM (` + rawUnion + `) u
+		) ranked
+		WHERE rn = 1`
 	if _, err := db.Exec(createSQL); err != nil {
 		log.Printf("ERROR: SearchMulti create: %v", err)
 		return SearchResult{Query: query, Total: 0, Offset: offset, Limit: limit, Hits: []Hit{}}
