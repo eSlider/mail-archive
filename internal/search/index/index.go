@@ -298,14 +298,15 @@ func SearchMulti(accounts []AccountIndex, query string, offset, limit int) Searc
 	// Build raw union first.
 	rawUnion := strings.Join(unionParts, " UNION ALL ")
 	// Deduplicate by content checksum (extracted from path): same email in multiple accounts
-	// (e.g. re-imported PST) appears once. Rows without checksum in path are kept as-is.
+	// (e.g. re-imported PST) appears once. Rows without checksum in path use account||path (keep all).
+	// Use NULLIF so regexp_extract empty string is treated as NULL for COALESCE fallback.
 	createSQL := `CREATE TEMP TABLE emails AS
 		SELECT account_id, path, subject, from_addr, to_addr, date, size, body_text
 		FROM (
 			SELECT *,
 				ROW_NUMBER() OVER (
 					PARTITION BY COALESCE(
-						regexp_extract(path, '([0-9a-f]{16})-', 1),
+						NULLIF(regexp_extract(path, '([0-9a-f]{16})-', 1), ''),
 						account_id || '::' || path
 					)
 					ORDER BY date DESC NULLS LAST

@@ -373,3 +373,33 @@ func TestSearchMultiDeduplicatesByChecksum(t *testing.T) {
 	}
 	t.Logf("SearchMulti: 4 rows across 2 accounts -> %d unique (deduplicated)", result.Total)
 }
+
+func TestSearchMultiKeepsAllWhenNoChecksumInPath(t *testing.T) {
+	// Paths without checksum format (e.g. readpst output "message_1.eml") must not be collapsed.
+	// regexp_extract returns empty/NULL -> we use account||path, so each row stays unique.
+	root := t.TempDir()
+
+	dir := filepath.Join(root, "readpst-style")
+	inbox := filepath.Join(dir, "inbox")
+	if err := os.MkdirAll(inbox, 0755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(inbox, "message_1.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 1\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 1"), 0644)
+	os.WriteFile(filepath.Join(inbox, "message_2.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 2\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 2"), 0644)
+	os.WriteFile(filepath.Join(inbox, "message_3.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 3\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 3"), 0644)
+
+	parquetPath := filepath.Join(root, "idx.parquet")
+	idx, err := index.New(dir, parquetPath)
+	if err != nil {
+		t.Fatalf("index.New: %v", err)
+	}
+	idx.Build()
+	idx.Close()
+
+	accounts := []index.AccountIndex{{ID: "acct-1", IndexPath: parquetPath}}
+	result := index.SearchMulti(accounts, "", 0, 100)
+
+	if result.Total != 3 {
+		t.Errorf("SearchMulti total = %d, want 3 (all kept when no checksum in path)", result.Total)
+	}
+}
