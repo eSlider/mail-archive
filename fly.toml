@@ -1,0 +1,29 @@
+# Fly.io app configuration for Mail Archive
+# See https://fly.io/docs/reference/configuration/
+
+app = "mail-archive"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  LISTEN_ADDR = ":8090"
+  DATA_DIR = "/data"
+  STATIC_DIR = "/app/web/static"
+
+[http_service]
+  internal_port = 8090
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[mounts]
+  source = "mail_archive_data"
+  destination = "/data"

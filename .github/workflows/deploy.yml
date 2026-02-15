@@ -1,0 +1,36 @@
+# Deploy Mail Archive to Fly.io (or other platforms) on release.
+# Requires repository secrets to be configured — see docs/DEPLOYMENT.md.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Deploy target"
+        required: true
+        default: fly
+        type: choice
+        options:
+          - fly
+  push:
+    tags: ["v*"]
+
+jobs:
+  deploy-fly:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.platform == 'fly' || github.event.inputs.platform == '' || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Fly CLI
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly.io
+        run: |
+          flyctl deploy --remote-only \
+            --build-arg VERSION=${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        continue-on-error: true  # Don't fail CI if secrets not configured
