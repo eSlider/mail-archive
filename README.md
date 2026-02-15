@@ -51,6 +51,8 @@ Docker images are published to `ghcr.io/eSlider/mail-archive` with SemVer tags (
 docker pull ghcr.io/eslider/mail-archive:v1.0.1
 ```
 
+For deploying to free-tier platforms (Fly.io, OpenShift, AWS) and CI/CD secrets setup, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Configuration
 
 ### Environment Variables
