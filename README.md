@@ -4,35 +4,30 @@
 [![CI](https://github.com/eSlider/mail-archive/actions/workflows/ci.yml/badge.svg)](https://github.com/eSlider/mail-archive/actions/workflows/ci.yml)
 [![Docker](https://github.com/eSlider/mail-archive/actions/workflows/docker.yml/badge.svg)](https://github.com/eSlider/mail-archive/actions/workflows/docker.yml)
 
-Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem. **Never deletes or marks emails as read.**
+Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem.
+
+> [!NOTE]
+> **The service **never** deletes or marks emails as read.**
 
 ## Purpose
 
-Main hub of all messages from every system — something like Kafka — where unstructured data becomes structured (files, S3, etc.) to integrate into other systems.
-
-## Main Goals (not all realized)
-
-- **Catch all mails from everywhere** — old MS Office files, Thunderbird, Bat Mailer, zip-files of mails, etc. — to enable indexing messages for:
-  - **Search:** subjects, fuzzy search, advanced filtering by address (BCC, CC, From, To, etc.), companies, persons, natural/juristic entities
-  - **Semantic search:** contacts by meaning (similarity search)
-  - **Geo search:** addresses parsed from all files, displayed on a map
-- **ETL pipeline:** collect all data into RFC/ISO format files, then adapt into existing CRMs using job-task-process mechanics from profile
+Central hub for all email. Aggregates messages from every source into structured storage (filesystem, S3). Unstructured mail becomes normalized data ready for downstream systems.
 
 ## Features
 
-- **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
-- **Multi-account** — each user manages their own email accounts
-- **Protocol support** — IMAP, POP3, Gmail API
-- **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
-- **Deduplication** — SHA-256 content checksums prevent duplicate storage
-- **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
-- **Live sync** — cancel running syncs, real-time progress, auto-reindex every 5s
-- **Date preservation** — file mtime set from email Date/Received headers
-- **UUIDv7 IDs** — time-ordered identifiers for all entities
-- **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
-- **Per-user isolation** — all data under `users/{uuid}/`
-- **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
-- **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
+- ✓ **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
+- ✓ **Multi-account** — each user manages their own email accounts
+- ✓ **Protocol support** — IMAP, POP3, Gmail API (not yet fully)
+- ✓ **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
+- ✓ **Deduplication** — SHA-256 content checksums prevent duplicate storage
+- ✓ **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
+- ✓ **Live sync** — cancel running syncs, real-time progress, auto-reindex every 5s
+- ✓ **Date preservation** — file mtime set from email Date/Received headers
+- ✓ **UUIDv7 IDs** — time-ordered identifiers for all entities
+- ✓ **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
+- ✓ **Per-user isolation** — all data under `users/{uuid}/`
+- ✓ **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
+- ✓ **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
 
 ## Quick Start
 
@@ -231,13 +226,14 @@ web/static/
 
 ## Todo
 
-- **Storage backend:** store files on S3 (AWS/Minio, etc.) or local file system
+- **Storage backend** — S3 (AWS/Minio) or pluggable local filesystem
+
+See (TODO's)[TODO.md]
 
 ## Ideas
 
-- **Advanced analytics**
-  - Conversation development history on the map and history scroller-progress bar
-- **Callback registration:** system for search-filters and triggering callbacks as soon as an email is received
+- **Advanced analytics** — Conversation timeline on the map; history scroller with progress bar
+- **Callback registration** — Search filters that trigger callbacks when matching emails arrive
 
 ## API
 
