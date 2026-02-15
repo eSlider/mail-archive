@@ -1,6 +1,7 @@
 // Package pst implements PST/OST file import.
-// Extracts messages from Microsoft Outlook personal storage files
-// and saves them as .eml files preserving original dates.
+// Extracts messages, contacts, appointments, and notes from Microsoft Outlook
+// personal storage files. Emails as .eml, contacts as .vcf, calendars as .ics,
+// notes as .txt — stored in the same folder hierarchy as .eml files.
 package pst
 
 import (
@@ -21,6 +22,12 @@ import (
 	"golang.org/x/text/encoding"
 
 	charsets "github.com/emersion/go-message/charset"
+)
+
+// MAPI property IDs for common item properties (PidTagSubject, PidTagBody).
+const (
+	mapiTagSubject = 55
+	mapiTagBody    = 4096
 )
 
 func init() {
@@ -96,17 +103,17 @@ func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, e
 
 		for iter.Next() {
 			msg := iter.Value()
-			emlData, date := messageToEML(msg)
-			if emlData == nil {
+			data, ext, date := itemToStoredFormat(msg, folderPath)
+			if data == nil {
 				errCount++
 				continue
 			}
 
-			checksum := contentChecksum(emlData)
-			filename := fmt.Sprintf("%s-%d.eml", checksum, extracted)
+			checksum := contentChecksum(data)
+			filename := fmt.Sprintf("%s-%d.%s", checksum, extracted, ext)
 			path := filepath.Join(dir, filename)
 
-			if err := os.WriteFile(path, emlData, 0o644); err != nil {
+			if err := os.WriteFile(path, data, 0o644); err != nil {
 				log.Printf("WARN: write %s: %v", path, err)
 				errCount++
 				continue
@@ -135,30 +142,40 @@ func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, e
 	return extracted, errCount, nil
 }
 
-// messageToEML converts a PST message to RFC822 .eml format.
-func messageToEML(msg *pst.Message) ([]byte, time.Time) {
-	var subject, from, to, body string
-	var date time.Time
-
+// itemToStoredFormat converts a PST item to the appropriate storage format.
+// Returns (data, ext, date). ext is "eml", "vcf", "ics", or "txt".
+func itemToStoredFormat(msg *pst.Message, folderPath string) ([]byte, string, time.Time) {
 	switch p := msg.Properties.(type) {
 	case *properties.Message:
-		subject = p.GetSubject()
-		from = formatSender(p.GetSenderName(), p.GetSenderEmailAddress())
-		to = p.GetDisplayTo()
-		body = p.GetBody()
-		if ct := p.GetClientSubmitTime(); ct > 0 {
-			date = time.Unix(ct, 0)
-		} else if dt := p.GetMessageDeliveryTime(); dt > 0 {
-			date = time.Unix(dt, 0)
+		if strings.Contains(folderPath, "note") {
+			return messageToNoteTxt(p), "txt", messageDate(p.GetClientSubmitTime(), p.GetMessageDeliveryTime())
 		}
+		return messageToEML(p), "eml", messageDate(p.GetClientSubmitTime(), p.GetMessageDeliveryTime())
+	case *properties.Appointment:
+		return appointmentToICS(msg, p), "ics", appointmentDate(p)
+	case *properties.Contact:
+		return contactToVCF(p), "vcf", contactDate(p)
 	default:
-		// Skip non-message items (appointments, contacts, etc.).
-		return nil, time.Time{}
+		return nil, "", time.Time{}
 	}
+}
 
-	if date.IsZero() {
-		date = time.Now()
+func messageDate(clientSubmit, messageDelivery int64) time.Time {
+	if clientSubmit > 0 {
+		return time.Unix(clientSubmit, 0)
 	}
+	if messageDelivery > 0 {
+		return time.Unix(messageDelivery, 0)
+	}
+	return time.Now()
+}
+
+func messageToEML(p *properties.Message) []byte {
+	subject := p.GetSubject()
+	from := formatSender(p.GetSenderName(), p.GetSenderEmailAddress())
+	to := p.GetDisplayTo()
+	body := p.GetBody()
+	date := messageDate(p.GetClientSubmitTime(), p.GetMessageDeliveryTime())
 	dateStr := date.Format(time.RFC1123Z)
 
 	var sb strings.Builder
@@ -173,7 +190,213 @@ func messageToEML(msg *pst.Message) ([]byte, time.Time) {
 	sb.WriteString("\r\n")
 	sb.WriteString(body)
 
-	return []byte(sb.String()), date
+	return []byte(sb.String())
+}
+
+// messageToNoteTxt converts a sticky-note Message to plain text.
+func messageToNoteTxt(p *properties.Message) []byte {
+	subject := p.GetSubject()
+	body := p.GetBody()
+	if subject != "" && body != "" {
+		return []byte(subject + "\n\n" + body)
+	}
+	if subject != "" {
+		return []byte(subject)
+	}
+	return []byte(body)
+}
+
+// readSubjectBody reads Subject and Body from a message's PropertyContext (for Appointment/Contact).
+func readSubjectBody(msg *pst.Message) (subject, body string) {
+	if msg.PropertyContext == nil {
+		return "", ""
+	}
+	if r, err := msg.PropertyContext.GetPropertyReader(mapiTagSubject, msg.LocalDescriptors); err == nil {
+		subject, _ = r.GetString()
+	}
+	if r, err := msg.PropertyContext.GetPropertyReader(mapiTagBody, msg.LocalDescriptors); err == nil {
+		body, _ = r.GetString()
+	}
+	return subject, body
+}
+
+func appointmentDate(p *properties.Appointment) time.Time {
+	if t := p.GetAppointmentStartWhole(); t > 0 {
+		return time.Unix(t, 0)
+	}
+	if t := p.GetClipStart(); t > 0 {
+		return time.Unix(t, 0)
+	}
+	return time.Now()
+}
+
+// appointmentToICS converts a PST appointment to iCalendar (.ics) format.
+func appointmentToICS(msg *pst.Message, p *properties.Appointment) []byte {
+	subject, body := readSubjectBody(msg)
+	if subject == "" {
+		subject = "Untitled"
+	}
+	loc := p.GetLocation()
+	start := p.GetAppointmentStartWhole()
+	end := p.GetAppointmentEndWhole()
+	if start == 0 {
+		start = p.GetClipStart()
+	}
+	if end == 0 {
+		end = p.GetClipEnd()
+	}
+	if end <= start {
+		end = start + 3600 // 1 hour default
+	}
+
+	startT := time.Unix(start, 0).UTC().Format("20060102T150405Z")
+	endT := time.Unix(end, 0).UTC().Format("20060102T150405Z")
+	now := time.Now().UTC().Format("20060102T150405Z")
+	uid := fmt.Sprintf("pst-%d@imported", start)
+
+	var sb strings.Builder
+	sb.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//PST Import//EN\r\n")
+	sb.WriteString("BEGIN:VEVENT\r\n")
+	sb.WriteString("UID:" + uid + "\r\n")
+	sb.WriteString("DTSTAMP:" + now + "\r\n")
+	sb.WriteString("DTSTART:" + startT + "\r\n")
+	sb.WriteString("DTEND:" + endT + "\r\n")
+	sb.WriteString("SUMMARY:" + foldLine(escapeICS(subject)) + "\r\n")
+	if loc != "" {
+		sb.WriteString("LOCATION:" + foldLine(escapeICS(loc)) + "\r\n")
+	}
+	if body != "" {
+		sb.WriteString("DESCRIPTION:" + foldLine(escapeICS(body)) + "\r\n")
+	}
+	sb.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+	return []byte(sb.String())
+}
+
+func escapeICS(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, ";", "\\;")
+	s = strings.ReplaceAll(s, ",", "\\,")
+	s = strings.ReplaceAll(s, "\r\n", "\\n")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	return s
+}
+
+func foldLine(s string) string {
+	const maxLen = 75
+	if len(s) <= maxLen {
+		return s
+	}
+	var sb strings.Builder
+	for len(s) > maxLen {
+		sb.WriteString(s[:maxLen])
+		sb.WriteString("\r\n ")
+		s = s[maxLen:]
+	}
+	sb.WriteString(s)
+	return sb.String()
+}
+
+func contactDate(p *properties.Contact) time.Time {
+	if t := p.GetBirthdayLocal(); t > 0 {
+		return time.Unix(t, 0)
+	}
+	return time.Now()
+}
+
+// contactToVCF converts a PST contact to vCard (.vcf) format.
+func contactToVCF(p *properties.Contact) []byte {
+	fn := contactDisplayName(p)
+	if fn == "" {
+		fn = "Unknown"
+	}
+	given := p.GetGivenName()
+	family := p.GetSurname()
+	org := p.GetCompanyName()
+	email := p.GetEmail1EmailAddress()
+	if email == "" {
+		email = p.GetEmail2EmailAddress()
+	}
+	if email == "" {
+		email = p.GetEmail3EmailAddress()
+	}
+	phone := p.GetPrimaryTelephoneNumber()
+	if phone == "" {
+		phone = p.GetBusinessTelephoneNumber()
+	}
+	if phone == "" {
+		phone = p.GetHomeTelephoneNumber()
+	}
+	addr := p.GetWorkAddressStreet()
+	if addr == "" {
+		addr = p.GetHomeAddressStreet()
+	}
+	city := p.GetWorkAddressCity()
+	if city == "" {
+		city = p.GetHomeAddressCity()
+	}
+	region := p.GetWorkAddressState()
+	if region == "" {
+		region = p.GetHomeAddressStateOrProvince()
+	}
+	postal := p.GetWorkAddressPostalCode()
+	if postal == "" {
+		postal = p.GetHomeAddressPostalCode()
+	}
+	country := p.GetWorkAddressCountry()
+	if country == "" {
+		country = p.GetHomeAddressCountry()
+	}
+
+	var sb strings.Builder
+	sb.WriteString("BEGIN:VCARD\r\nVERSION:3.0\r\n")
+	sb.WriteString("FN:" + vcfEscape(fn) + "\r\n")
+	if given != "" || family != "" {
+		sb.WriteString("N:" + vcfEscape(family) + ";" + vcfEscape(given) + ";;;\r\n")
+	}
+	if org != "" {
+		sb.WriteString("ORG:" + vcfEscape(org) + "\r\n")
+	}
+	if email != "" {
+		sb.WriteString("EMAIL:" + vcfEscape(email) + "\r\n")
+	}
+	if phone != "" {
+		sb.WriteString("TEL:" + vcfEscape(phone) + "\r\n")
+	}
+	if addr != "" || city != "" || region != "" || postal != "" || country != "" {
+		sb.WriteString("ADR:;;" + vcfEscape(addr) + ";" + vcfEscape(city) + ";" + vcfEscape(region) + ";" + vcfEscape(postal) + ";" + vcfEscape(country) + "\r\n")
+	}
+	if b := p.GetBirthdayLocal(); b > 0 {
+		sb.WriteString("BDAY:" + time.Unix(b, 0).Format("2006-01-02") + "\r\n")
+	}
+	sb.WriteString("END:VCARD\r\n")
+
+	return []byte(sb.String())
+}
+
+func contactDisplayName(p *properties.Contact) string {
+	if s := p.GetFileUnder(); s != "" {
+		return s
+	}
+	given := p.GetGivenName()
+	family := p.GetSurname()
+	if given != "" || family != "" {
+		return strings.TrimSpace(given + " " + family)
+	}
+	if s := p.GetEmail1DisplayName(); s != "" {
+		return s
+	}
+	if s := p.GetEmail1EmailAddress(); s != "" {
+		return s
+	}
+	return p.GetDisplayNamePrefix()
+}
+
+func vcfEscape(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, ";", "\\;")
+	s = strings.ReplaceAll(s, ",", "\\,")
+	return s
 }
 
 func formatSender(name, email string) string {
@@ -218,8 +441,11 @@ func importReadpst(pstPath, emailDir string, onProgress ProgressFunc) (int, int,
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.ToLower(filepath.Ext(path)) == ".eml" {
-			count++
+		if !info.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext == ".eml" || ext == ".vcf" || ext == ".ics" || ext == ".txt" {
+				count++
+			}
 		}
 		return nil
 	})

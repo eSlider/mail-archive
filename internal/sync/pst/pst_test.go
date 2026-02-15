@@ -74,20 +74,23 @@ func TestImportFromDataFiles(t *testing.T) {
 				t.Logf("file has no extractable messages (may contain only appointments/contacts)")
 			}
 
-			// Verify .eml files were written.
-			var emlCount int
+			// Verify extracted files were written (.eml, .vcf, .ics, .txt).
+			var fileCount int
 			filepath.Walk(emailDir, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
-				if !info.IsDir() && filepath.Ext(path) == ".eml" {
-					emlCount++
+				if !info.IsDir() {
+					ext := strings.ToLower(filepath.Ext(path))
+					if ext == ".eml" || ext == ".vcf" || ext == ".ics" || ext == ".txt" {
+						fileCount++
+					}
 				}
 				return nil
 			})
 
-			if extracted > 0 && emlCount != extracted {
-				t.Errorf("extracted=%d but found %d .eml files", extracted, emlCount)
+			if extracted > 0 && fileCount != extracted {
+				t.Errorf("extracted=%d but found %d files (.eml/.vcf/.ics/.txt)", extracted, fileCount)
 			}
 
 			t.Logf("extracted=%d errors=%d progressCalls=%d", extracted, errCount, progressCalls)
@@ -142,37 +145,40 @@ func TestImportExtractionWorks(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 
-	var emlCount int
+	var fileCount int
 	filepath.Walk(emailDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && filepath.Ext(path) == ".eml" {
-			emlCount++
+		if !info.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext == ".eml" || ext == ".vcf" || ext == ".ics" || ext == ".txt" {
+				fileCount++
+			}
 		}
 		return nil
 	})
 
-	if extracted != emlCount {
-		t.Errorf("extracted=%d but found %d .eml files", extracted, emlCount)
+	if extracted != fileCount {
+		t.Errorf("extracted=%d but found %d files", extracted, fileCount)
 	}
 	if extracted == 0 {
-		t.Fatalf("expected at least one email from %s (errCount=%d)", filepath.Base(pstPath), errCount)
+		t.Fatalf("expected at least one item from %s (errCount=%d)", filepath.Base(pstPath), errCount)
 	}
 
-	// Verify .eml files have RFC822-style headers.
-	var samplePath string
+	// Verify at least one .eml file has RFC822-style headers.
+	var sampleEmlPath string
 	filepath.Walk(emailDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || samplePath != "" {
+		if err != nil || sampleEmlPath != "" {
 			return err
 		}
-		if !info.IsDir() && filepath.Ext(path) == ".eml" {
-			samplePath = path
+		if !info.IsDir() && strings.ToLower(filepath.Ext(path)) == ".eml" {
+			sampleEmlPath = path
 		}
 		return nil
 	})
-	if samplePath != "" {
-		body, err := os.ReadFile(samplePath)
+	if sampleEmlPath != "" {
+		body, err := os.ReadFile(sampleEmlPath)
 		if err != nil {
 			t.Errorf("read sample .eml: %v", err)
 		} else if !containsAll(body, "From:", "Subject:") {
@@ -180,7 +186,7 @@ func TestImportExtractionWorks(t *testing.T) {
 		}
 	}
 
-	t.Logf("extracted %d emails, %d errors", extracted, errCount)
+	t.Logf("extracted %d items (eml/vcf/ics/txt), %d errors", extracted, errCount)
 }
 
 func containsAll(b []byte, subs ...string) bool {
