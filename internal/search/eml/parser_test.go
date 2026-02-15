@@ -254,11 +254,12 @@ func TestParseFileFull_NonExistent(t *testing.T) {
 func TestParseFileFull_CIDInlineImage(t *testing.T) {
 	dir := t.TempDir()
 	// multipart/related: HTML with cid: reference + inline PNG (1x1 red pixel)
+	// Matches Gmail/Outlook style: cid: with @domain, img src="cid:...".
 	raw := "From: a@b.com\r\nTo: c@d.com\r\nSubject: With Inline Image\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n" +
 		"Content-Type: multipart/related; boundary=\"REL\"\r\n\r\n" +
 		"--REL\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
-		"<html><body><p>See logo:</p><img src=\"cid:ii_logo123@mail.gmail.com\" alt=\"logo\"/></body></html>\r\n" +
-		"--REL\r\nContent-Type: image/png; name=\"logo.png\"\r\nContent-Disposition: inline\r\nContent-ID: <ii_logo123@mail.gmail.com>\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
+		`<html><body><img src="cid:17711756476991fedf126cb645684293@markets-platform.com" alt="" width="482" height="502"></body></html>` + "\r\n" +
+		"--REL\r\nContent-Type: image/png; name=\"logo.png\"\r\nContent-Disposition: inline\r\nContent-ID: <17711756476991fedf126cb645684293@markets-platform.com>\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
 		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQHwAEBgIApD5fRAAAAABJRU5ErkJggg==\r\n" +
 		"--REL--\r\n"
 	path := writeTestEml(t, dir, "cid-inline.eml", raw)
@@ -267,10 +268,7 @@ func TestParseFileFull_CIDInlineImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(fe.HTMLBody, "See logo:") {
-		t.Errorf("html_body missing text: %q", fe.HTMLBody)
-	}
-	if strings.Contains(fe.HTMLBody, "cid:ii_logo123") {
+	if strings.Contains(fe.HTMLBody, "cid:17711756476991") {
 		t.Errorf("cid: was not rewritten in html_body")
 	}
 	if !strings.Contains(fe.HTMLBody, "data:image/png;base64,") {

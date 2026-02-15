@@ -490,9 +490,12 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail, inlinePar
 
 		charset := partParams["charset"]
 
-		disposition := part.Header.Get("Content-Disposition")
-		isAttachment := strings.HasPrefix(disposition, "attachment") ||
-			(part.FileName() != "" && !strings.HasPrefix(partMedia, "text/"))
+		disposition := strings.ToLower(part.Header.Get("Content-Disposition"))
+		contentID := strings.TrimSpace(part.Header.Get("Content-ID"))
+		// Inline parts with Content-ID (cid:) are embedded images, not attachments.
+		isInlineWithCID := contentID != "" && strings.HasPrefix(disposition, "inline")
+		isAttachment := !isInlineWithCID && (strings.HasPrefix(disposition, "attachment") ||
+			(part.FileName() != "" && !strings.HasPrefix(partMedia, "text/")))
 
 		if isAttachment {
 			data, _ := io.ReadAll(io.LimitReader(part, 10*1024*1024))
@@ -527,7 +530,6 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail, inlinePar
 		}
 
 		// Inline part with Content-ID (e.g. embedded image referenced by cid: in HTML).
-		contentID := strings.TrimSpace(part.Header.Get("Content-ID"))
 		if contentID != "" {
 			data, _ := io.ReadAll(io.LimitReader(decodeTransferEncoding(part, cte), 5*1024*1024))
 			cid := normalizeCID(contentID)
