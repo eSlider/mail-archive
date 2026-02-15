@@ -242,6 +242,15 @@ users/{uuid}/gmail.com/eslider/inbox/a1b2c3d4e5f67890-12345.eml
 - Deduplication: by content checksum (IMAP/POP3) or message ID (Gmail)
 - Use `./mails fix-dates` to batch-repair mtime on all existing .eml files
 
+### PST Import Storage
+
+PST/OST imports use the same structure and naming as .eml files:
+
+- Emails: `{checksum}-{id}.eml` (RFC 822)
+- Contacts: `{checksum}-{id}.vcf` (vCard 3.0)
+- Calendars: `{checksum}-{id}.ics` (iCalendar 2.0)
+- Notes: `{checksum}-{id}.txt` (plain text, from folder names containing "note")
+
 ## Docker
 
 ```bash
