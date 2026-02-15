@@ -6,6 +6,18 @@
 
 Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem. **Never deletes or marks emails as read.**
 
+## Purpose
+
+Main hub of all messages from every system — something like Kafka — where unstructured data becomes structured (files, S3, etc.) to integrate into other systems.
+
+## Main Goals (not all realized)
+
+- **Catch all mails from everywhere** — old MS Office files, Thunderbird, Bat Mailer, zip-files of mails, etc. — to enable indexing messages for:
+  - **Search:** subjects, fuzzy search, advanced filtering by address (BCC, CC, From, To, etc.), companies, persons, natural/juristic entities
+  - **Semantic search:** contacts by meaning (similarity search)
+  - **Geo search:** addresses parsed from all files, displayed on a map
+- **ETL pipeline:** collect all data into RFC/ISO format files, then adapt into existing CRMs using job-task-process mechanics from profile
+
 ## Features
 
 - **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
@@ -216,6 +228,16 @@ web/static/
       main.js                        # App logic (native fetch, ES6+)
       main.template.vue              # Vue template (HTML with directives)
 ```
+
+## Todo
+
+- **Storage backend:** store files on S3 (AWS/Minio, etc.) or local file system
+
+## Ideas
+
+- **Advanced analytics**
+  - Conversation development history on the map and history scroller-progress bar
+- **Callback registration:** system for search-filters and triggering callbacks as soon as an email is received
 
 ## API
 
