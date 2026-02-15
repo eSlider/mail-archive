@@ -1,22 +1,31 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage build for the Mail Archive Go application.
 # Stage 1: Build the Go binary
 FROM golang:1.24-bookworm AS builder
 
+# Install build dependencies (CGO, git for module fetching).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git gcc g++ libc-dev && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 
-# Install C dependencies for CGO (DuckDB, SQLite).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libc-dev && rm -rf /var/lib/apt/lists/*
-
-# Cache Go module downloads.
+# Copy go mod files first for better caching.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
 # Copy source and build.
 # VERSION injected at build time for tagged releases (e.g. 1.0.1).
 ARG VERSION=dev
 COPY . .
-RUN CGO_ENABLED=1 go build -ldflags "-X main.version=${VERSION}" -o /mails ./cmd/mails
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=linux \
+    go build -p $(nproc) \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -trimpath \
+    -o /mails \
+    ./cmd/mails
 
 # Stage 2: Runtime image
 FROM debian:bookworm-slim
