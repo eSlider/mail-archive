@@ -254,6 +254,8 @@ PST/OST imports use the same structure and naming as .eml files:
 
 ## Docker
 
+See [docs/DOCKER.md](docs/DOCKER.md) for tini, runtime dependencies, and build details.
+
 ```bash
 # Development
 docker compose up
