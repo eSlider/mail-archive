@@ -4,6 +4,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -58,6 +59,19 @@ func NewRouter(cfg Config) http.Handler {
 	r.Get("/favicon.ico", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/static/favicon.svg", http.StatusMovedPermanently)
 	})
+
+	// PWA: service worker and manifest with correct MIME types.
+	if StaticDir != "" {
+		r.Get("/sw.js", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/javascript")
+			w.Header().Set("Service-Worker-Allowed", "/")
+			http.ServeFile(w, r, filepath.Join(StaticDir, "sw.js"))
+		})
+		r.Get("/manifest.webmanifest", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/manifest+json")
+			http.ServeFile(w, r, filepath.Join(StaticDir, "manifest.webmanifest"))
+		})
+	}
 
 	// Public routes.
 	r.Group(func(r chi.Router) {

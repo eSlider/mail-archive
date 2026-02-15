@@ -6,6 +6,8 @@
 
 Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem.
 
+**Summary:** Central email hub for multiple accounts. Syncs from IMAP, POP3, Gmail into per-user `.eml` storage with DuckDB/Parquet search and optional vector search (Qdrant + Ollama). Read-only sync, no deletions. See [Competitors](docs/competitors.md) for similar OSS projects.
+
 ## Purpose
 
 Central hub for all email. Aggregates messages from every source into structured storage (filesystem, S3). Unstructured mail becomes normalized data ready for downstream systems.
@@ -25,6 +27,7 @@ Central hub for all email. Aggregates messages from every source into structured
 - [x] **Per-user isolation** — all data under `users/{uuid}/`
 - [x] **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
 - [x] **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
+- [x] **PWA** — installable on desktop and mobile (standalone app, offline shell for static assets)
 
 > [!NOTE]
 > **The service **never** deletes or marks emails as read.**
@@ -171,6 +174,10 @@ docker compose watch
 
 The frontend uses **Vue.js 3** and **native fetch** with zero build tooling — no webpack, no Vite, no TypeScript. All vendor libraries are committed locally under `web/static/js/vendor/` (no CDN dependency).
 
+### PWA installation
+
+The app is installable as a Progressive Web App. Use your browser’s install option (Chrome/Edge: menu → “Install…”; Safari iOS: Share → “Add to Home Screen”). Requires HTTPS in production (localhost works for development).
+
 ### Mobile features
 
 - **Bottom navigation** — Search, Accounts, Import tabs (viewport &lt; 768px)
@@ -216,12 +223,16 @@ This keeps the template editable as a proper `.vue` file (with IDE syntax highli
 ```
 web/static/
   css/app.css                        # Application styles (dark theme, responsive)
+  favicon.svg
+  manifest.webmanifest               # PWA manifest
+  sw.js                              # Service worker (served at /sw.js)
   js/
     vendor/
       vue-3.5.13.global.prod.js      # Vue.js (local copy)
     app/
       main.js                        # App logic (native fetch, ES6+)
       main.template.vue              # Vue template (HTML with directives)
+    sw-register.js                   # Service worker registration
 ```
 
 ## Todo
