@@ -407,7 +407,7 @@ func TestVector_FullPipeline_SyncIndexSearch(t *testing.T) {
 
 	// Step 2: Build keyword index (DuckDB).
 	indexPath := filepath.Join(emailDir, "index.parquet")
-	idx, err := index.New(emailDir, indexPath)
+	idx, err := index.New(emailDir, indexPath, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +430,7 @@ func TestVector_FullPipeline_SyncIndexSearch(t *testing.T) {
 	}
 
 	// Step 5: Search both.
-	idx2, _ := index.New(emailDir, indexPath)
+	idx2, _ := index.New(emailDir, indexPath, nil, "")
 	defer idx2.Close()
 
 	kwResult := idx2.Search("invoice", 0, 50)

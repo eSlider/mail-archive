@@ -11,7 +11,7 @@ import (
 // newTestIndex creates an in-memory index (no parquet persistence) for testing.
 func newTestIndex(t *testing.T, dir string) *index.Index {
 	t.Helper()
-	idx, err := index.New(dir, "")
+	idx, err := index.New(dir, "", nil, "")
 	if err != nil {
 		t.Fatalf("index.New: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestParquetPersistence(t *testing.T) {
 	parquetPath := filepath.Join(t.TempDir(), "test.parquet")
 
 	// Build and save to parquet.
-	idx1, err := index.New(dir, parquetPath)
+	idx1, err := index.New(dir, parquetPath, nil, "")
 	if err != nil {
 		t.Fatalf("index.New: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestParquetPersistence(t *testing.T) {
 	t.Logf("Parquet file size: %d bytes", info.Size())
 
 	// Load from parquet — should not need to re-parse .eml files.
-	idx2, err := index.New(dir, parquetPath)
+	idx2, err := index.New(dir, parquetPath, nil, "")
 	if err != nil {
 		t.Fatalf("index.New (reload): %v", err)
 	}
@@ -343,14 +343,14 @@ func TestSearchMultiDeduplicatesByChecksum(t *testing.T) {
 	parquet1 := filepath.Join(root, "idx1.parquet")
 	parquet2 := filepath.Join(root, "idx2.parquet")
 
-	idx1, err := index.New(dir1, parquet1)
+	idx1, err := index.New(dir1, parquet1, nil, "")
 	if err != nil {
 		t.Fatalf("index.New 1: %v", err)
 	}
 	idx1.Build()
 	idx1.Close()
 
-	idx2, err := index.New(dir2, parquet2)
+	idx2, err := index.New(dir2, parquet2, nil, "")
 	if err != nil {
 		t.Fatalf("index.New 2: %v", err)
 	}
@@ -389,7 +389,7 @@ func TestSearchMultiKeepsAllWhenNoChecksumInPath(t *testing.T) {
 	os.WriteFile(filepath.Join(inbox, "message_3.eml"), []byte("From: a@b.com\r\nTo: c@d.com\r\nSubject: Msg 3\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody 3"), 0644)
 
 	parquetPath := filepath.Join(root, "idx.parquet")
-	idx, err := index.New(dir, parquetPath)
+	idx, err := index.New(dir, parquetPath, nil, "")
 	if err != nil {
 		t.Fatalf("index.New: %v", err)
 	}
@@ -421,10 +421,10 @@ func TestSearchMultiDeduplicatesByContentWhenNoChecksumInPath(t *testing.T) {
 		os.WriteFile(filepath.Join(inbox, "message_2.eml"), []byte(eml2), 0644)
 	}
 
-	idx1, _ := index.New(filepath.Join(root, "import-1"), filepath.Join(root, "idx1.parquet"))
+	idx1, _ := index.New(filepath.Join(root, "import-1"), filepath.Join(root, "idx1.parquet"), nil, "")
 	idx1.Build()
 	idx1.Close()
-	idx2, _ := index.New(filepath.Join(root, "import-2"), filepath.Join(root, "idx2.parquet"))
+	idx2, _ := index.New(filepath.Join(root, "import-2"), filepath.Join(root, "idx2.parquet"), nil, "")
 	idx2.Build()
 	idx2.Close()
 

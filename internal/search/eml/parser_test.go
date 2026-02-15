@@ -251,6 +251,69 @@ func TestParseFileFull_NonExistent(t *testing.T) {
 	}
 }
 
+func TestParseFileFull_CIDInlineImage(t *testing.T) {
+	dir := t.TempDir()
+	// multipart/related: HTML with cid: reference + inline PNG (1x1 red pixel)
+	// Matches Gmail/Outlook style: cid: with @domain, img src="cid:...".
+	raw := "From: a@b.com\r\nTo: c@d.com\r\nSubject: With Inline Image\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n" +
+		"Content-Type: multipart/related; boundary=\"REL\"\r\n\r\n" +
+		"--REL\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
+		`<html><body><img src="cid:17711756476991fedf126cb645684293@markets-platform.com" alt="" width="482" height="502"></body></html>` + "\r\n" +
+		"--REL\r\nContent-Type: image/png; name=\"logo.png\"\r\nContent-Disposition: inline\r\nContent-ID: <17711756476991fedf126cb645684293@markets-platform.com>\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
+		"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQHwAEBgIApD5fRAAAAABJRU5ErkJggg==\r\n" +
+		"--REL--\r\n"
+	path := writeTestEml(t, dir, "cid-inline.eml", raw)
+
+	fe, err := eml.ParseFileFull(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(fe.HTMLBody, "cid:17711756476991") {
+		t.Errorf("cid: was not rewritten in html_body")
+	}
+	if !strings.Contains(fe.HTMLBody, "data:image/png;base64,") {
+		t.Errorf("html_body missing data URI: %q", fe.HTMLBody)
+	}
+	if !strings.Contains(fe.HTMLBody, "iVBORw0KGgo") {
+		t.Errorf("html_body missing embedded base64 image data")
+	}
+}
+
+func TestExtractPartByCID(t *testing.T) {
+	dir := t.TempDir()
+	raw := "From: a@b.com\r\nTo: c@d.com\r\nSubject: CID Test\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n" +
+		"Content-Type: multipart/mixed; boundary=\"MIX\"\r\n\r\n" +
+		"--MIX\r\nContent-Type: text/plain\r\n\r\nBody.\r\n" +
+		"--MIX\r\nContent-Type: image/gif; name=\"dot.gif\"\r\nContent-Disposition: inline\r\nContent-ID: <dot@example.com>\r\n\r\n" +
+		"GIF87a\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;\r\n" +
+		"--MIX--\r\n"
+	path := writeTestEml(t, dir, "cid-extract.eml", raw)
+
+	data, ct, err := eml.ExtractPartByCID(path, "dot@example.com")
+	if err != nil {
+		t.Fatalf("ExtractPartByCID: %v", err)
+	}
+	if ct != "image/gif" {
+		t.Errorf("content_type = %q, want image/gif", ct)
+	}
+	if len(data) < 10 {
+		t.Errorf("data too short: %d bytes", len(data))
+	}
+	if !strings.HasPrefix(string(data), "GIF87a") {
+		t.Errorf("data should start with GIF87a, got %q", string(data)[:min(10, len(string(data)))])
+	}
+
+	_, _, err = eml.ExtractPartByCID(path, "<dot@example.com>")
+	if err != nil {
+		t.Errorf("ExtractPartByCID with angle brackets: %v", err)
+	}
+
+	_, _, err = eml.ExtractPartByCID(path, "nonexistent@example.com")
+	if err == nil {
+		t.Error("expected error for nonexistent CID")
+	}
+}
+
 // --- Charset decoding tests ---
 
 func TestParseFile_ISO88591Body(t *testing.T) {

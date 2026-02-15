@@ -109,6 +109,35 @@ func ParseFile(path string) (Email, error) {
 	}, nil
 }
 
+// ParseBytes parses .eml content from bytes. path is the logical path for the result.
+func ParseBytes(path string, data []byte) (Email, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return Email{}, fmt.Errorf("parse: %w", err)
+	}
+	h := msg.Header
+	date, _ := h.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
+	subject := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Subject"))))
+	from := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("From"))))
+	to := ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("To"))))
+	bodyText := extractBodyText(h.Get("Content-Type"), h.Get("Content-Transfer-Encoding"), msg.Body)
+	return Email{
+		Path:     path,
+		Subject:  subject,
+		From:     from,
+		To:       to,
+		Date:     date,
+		Size:     int64(len(data)),
+		BodyText: bodyText,
+	}, nil
+}
+
 // parseDateFuzzy tries multiple date layouts to handle non-standard Date headers
 // (e.g. missing timezone, unconventional formats).
 func parseDateFuzzy(raw string) time.Time {
@@ -309,6 +338,8 @@ var (
 	reHTMLTag    = regexp.MustCompile(`<[^>]*>`)
 	reWhitespace = regexp.MustCompile(`[\s]+`)
 	reHTMLEntity = regexp.MustCompile(`&[a-zA-Z0-9#]+;`)
+	// reCID matches cid: URLs in HTML (img src, style url(), etc). Captures the CID value with/without angle brackets.
+	reCID = regexp.MustCompile(`(?i)cid:(<[^>]+>|[^"')\s\]>]+)`)
 )
 
 func stripHTML(html string) string {
@@ -325,11 +356,49 @@ func stripHTML(html string) string {
 	return strings.TrimSpace(text)
 }
 
+// normalizeCID returns the Content-ID for map lookup (strips angle brackets, trims).
+func normalizeCID(cid string) string {
+	cid = strings.TrimSpace(cid)
+	if strings.HasPrefix(cid, "<") && strings.HasSuffix(cid, ">") {
+		cid = strings.TrimSpace(cid[1 : len(cid)-1])
+	}
+	return cid
+}
+
+// rewriteCIDsInHTML replaces cid: references in HTML with data: base64 URIs using the inline parts map.
+func rewriteCIDsInHTML(html string, inline map[string]inlinePart) string {
+	if len(inline) == 0 {
+		return html
+	}
+	return reCID.ReplaceAllStringFunc(html, func(match string) string {
+		subs := reCID.FindStringSubmatch(match)
+		if len(subs) < 2 {
+			return match
+		}
+		cid := normalizeCID(subs[1])
+		part, ok := inline[cid]
+		if !ok {
+			return match
+		}
+		ct := part.ContentType
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		return "data:" + ct + ";base64," + base64.StdEncoding.EncodeToString(part.Data)
+	})
+}
+
 // Attachment holds metadata about a MIME attachment.
 type Attachment struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Size        int    `json:"size"`
+}
+
+// inlinePart holds data for a Content-ID referenced part (e.g. inline image).
+type inlinePart struct {
+	Data        []byte
+	ContentType string
 }
 
 // FullEmail holds the complete parsed email for display, including HTML body.
@@ -395,6 +464,36 @@ func ParseFileFull(path string) (FullEmail, error) {
 	return fe, nil
 }
 
+// ParseFileFullFromBytes parses .eml content from bytes. path is the logical path for the result.
+func ParseFileFullFromBytes(path string, data []byte) (FullEmail, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
+	if err != nil {
+		return FullEmail{}, fmt.Errorf("parse: %w", err)
+	}
+	h := msg.Header
+	date, _ := h.Date()
+	if date.IsZero() {
+		date = parseDateFuzzy(h.Get("Date"))
+	}
+	if date.IsZero() {
+		date = parseReceivedDate(textproto.MIMEHeader(h))
+	}
+	fe := FullEmail{
+		Path:    path,
+		Subject: ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Subject")))),
+		From:    ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("From")))),
+		To:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("To")))),
+		CC:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Cc")))),
+		ReplyTo: ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Reply-To")))),
+		Date:    date,
+		Size:    int64(len(data)),
+	}
+	ct := h.Get("Content-Type")
+	cte := h.Get("Content-Transfer-Encoding")
+	extractFullBody(ct, cte, msg.Body, &fe)
+	return fe, nil
+}
+
 func extractFullBody(contentType, transferEncoding string, body io.Reader, fe *FullEmail) {
 	if contentType == "" {
 		contentType = "text/plain"
@@ -408,7 +507,11 @@ func extractFullBody(contentType, transferEncoding string, body io.Reader, fe *F
 	charset := params["charset"]
 
 	if strings.HasPrefix(mediaType, "multipart/") {
-		extractFullMultipart(params["boundary"], body, fe)
+		inlineParts := make(map[string]inlinePart)
+		extractFullMultipart(params["boundary"], body, fe, inlineParts)
+		if fe.HTMLBody != "" && len(inlineParts) > 0 {
+			fe.HTMLBody = rewriteCIDsInHTML(fe.HTMLBody, inlineParts)
+		}
 		return
 	}
 
@@ -421,7 +524,7 @@ func extractFullBody(contentType, transferEncoding string, body io.Reader, fe *F
 	}
 }
 
-func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
+func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail, inlineParts map[string]inlinePart) {
 	if boundary == "" {
 		return
 	}
@@ -446,9 +549,12 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
 
 		charset := partParams["charset"]
 
-		disposition := part.Header.Get("Content-Disposition")
-		isAttachment := strings.HasPrefix(disposition, "attachment") ||
-			(part.FileName() != "" && !strings.HasPrefix(partMedia, "text/"))
+		disposition := strings.ToLower(part.Header.Get("Content-Disposition"))
+		contentID := strings.TrimSpace(part.Header.Get("Content-ID"))
+		// Inline parts with Content-ID (cid:) are embedded images, not attachments.
+		isInlineWithCID := contentID != "" && strings.HasPrefix(disposition, "inline")
+		isAttachment := !isInlineWithCID && (strings.HasPrefix(disposition, "attachment") ||
+			(part.FileName() != "" && !strings.HasPrefix(partMedia, "text/")))
 
 		if isAttachment {
 			data, _ := io.ReadAll(io.LimitReader(part, 10*1024*1024))
@@ -462,7 +568,7 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
 		}
 
 		if strings.HasPrefix(partMedia, "multipart/") {
-			extractFullMultipart(partParams["boundary"], part, fe)
+			extractFullMultipart(partParams["boundary"], part, fe, inlineParts)
 			part.Close()
 			continue
 		}
@@ -482,6 +588,93 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
 			continue
 		}
 
+		// Inline part with Content-ID (e.g. embedded image referenced by cid: in HTML).
+		if contentID != "" {
+			data, _ := io.ReadAll(io.LimitReader(decodeTransferEncoding(part, cte), 5*1024*1024))
+			cid := normalizeCID(contentID)
+			if cid != "" {
+				inlineParts[cid] = inlinePart{Data: data, ContentType: partMedia}
+			}
+		}
+
+		part.Close()
+	}
+}
+
+// ExtractPartByCID reads a MIME part by Content-ID from an .eml file.
+// Returns the raw bytes, content-type, and any error. Used for serving inline images via API.
+func ExtractPartByCID(path string, cid string) ([]byte, string, error) {
+	cid = normalizeCID(cid)
+	if cid == "" {
+		return nil, "", fmt.Errorf("empty content-id")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	msg, err := mail.ReadMessage(bufio.NewReader(f))
+	if err != nil {
+		return nil, "", fmt.Errorf("parse %s: %w", path, err)
+	}
+
+	ct := msg.Header.Get("Content-Type")
+	mediaType, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		mediaType = "text/plain"
+		params = nil
+	}
+
+	if !strings.HasPrefix(mediaType, "multipart/") {
+		return nil, "", fmt.Errorf("email has no multipart structure")
+	}
+
+	boundary := params["boundary"]
+	if boundary == "" {
+		return nil, "", fmt.Errorf("multipart missing boundary")
+	}
+
+	var data []byte
+	var contentType string
+	extractPartByCID(multipart.NewReader(msg.Body, boundary), cid, &data, &contentType)
+	if data == nil {
+		return nil, "", fmt.Errorf("content-id %q not found", cid)
+	}
+	return data, contentType, nil
+}
+
+func extractPartByCID(mr *multipart.Reader, targetCID string, outData *[]byte, outContentType *string) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		ct := part.Header.Get("Content-Type")
+		cte := part.Header.Get("Content-Transfer-Encoding")
+		if ct == "" {
+			ct = "text/plain"
+		}
+		partMedia, partParams, _ := mime.ParseMediaType(ct)
+
+		contentID := part.Header.Get("Content-ID")
+		if normalizeCID(contentID) == targetCID {
+			decoded := decodeTransferEncoding(part, cte)
+			data, _ := io.ReadAll(io.LimitReader(decoded, 10*1024*1024))
+			part.Close()
+			*outData = data
+			*outContentType = partMedia
+			return
+		}
+
+		if strings.HasPrefix(partMedia, "multipart/") && partParams["boundary"] != "" {
+			extractPartByCID(multipart.NewReader(part, partParams["boundary"]), targetCID, outData, outContentType)
+			part.Close()
+			if *outData != nil {
+				return
+			}
+			continue
+		}
 		part.Close()
 	}
 }
@@ -489,15 +682,18 @@ func extractFullMultipart(boundary string, r io.Reader, fe *FullEmail) {
 // ExtractAttachment reads the Nth attachment (0-based index) from an .eml file.
 // Returns the raw bytes, content-type, filename, and any error.
 func ExtractAttachment(path string, index int) ([]byte, string, string, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("open %s: %w", path, err)
 	}
-	defer f.Close()
+	return ExtractAttachmentFromBytes(data, index)
+}
 
-	msg, err := mail.ReadMessage(bufio.NewReader(f))
+// ExtractAttachmentFromBytes extracts the Nth attachment from .eml content.
+func ExtractAttachmentFromBytes(data []byte, index int) ([]byte, string, string, error) {
+	msg, err := mail.ReadMessage(bytes.NewReader(data))
 	if err != nil {
-		return nil, "", "", fmt.Errorf("parse %s: %w", path, err)
+		return nil, "", "", fmt.Errorf("parse: %w", err)
 	}
 
 	ct := msg.Header.Get("Content-Type")
@@ -516,15 +712,15 @@ func ExtractAttachment(path string, index int) ([]byte, string, string, error) {
 		return nil, "", "", fmt.Errorf("multipart missing boundary")
 	}
 
-	var data []byte
+	var outData []byte
 	var contentType, filename string
 	var found bool
 	var idx int
-	extractPartByIndex(multipart.NewReader(msg.Body, boundary), index, &idx, &data, &contentType, &filename, &found)
+	extractPartByIndex(multipart.NewReader(msg.Body, boundary), index, &idx, &outData, &contentType, &filename, &found)
 	if !found {
 		return nil, "", "", fmt.Errorf("attachment index %d out of range", index)
 	}
-	return data, contentType, filename, nil
+	return outData, contentType, filename, nil
 }
 
 func extractPartByIndex(mr *multipart.Reader, targetIndex int, currentIndex *int, outData *[]byte, outContentType, outFilename *string, found *bool) {

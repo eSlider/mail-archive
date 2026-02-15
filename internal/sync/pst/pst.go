@@ -40,11 +40,16 @@ func init() {
 // ProgressFunc receives progress updates during PST import.
 type ProgressFunc func(phase string, current, total int)
 
+// SaveEmailFunc saves extracted data by full path. If nil, os.WriteFile is used.
+type SaveEmailFunc func(path string, data []byte) error
+
 // Import extracts all messages from a PST/OST file and saves them as .eml files.
 // Uses go-pst first; if it panics or fails, falls back to readpst (from pst-utils)
 // when available for broader OST compatibility.
+// saveFn optionally stores extracted files (e.g. to S3). If nil, uses os.WriteFile.
+// Note: readpst fallback always writes to local filesystem.
 // Returns (extracted count, error count).
-func Import(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error) {
+func Import(pstPath, emailDir string, onProgress ProgressFunc, saveFn SaveEmailFunc) (int, int, error) {
 	if onProgress == nil {
 		onProgress = func(string, int, int) {}
 	}
@@ -57,7 +62,7 @@ func Import(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error)
 				importErr = fmt.Errorf("go-pst panic: %v", r)
 			}
 		}()
-		extracted, errCount, importErr = importGoPst(pstPath, emailDir, onProgress)
+		extracted, errCount, importErr = importGoPst(pstPath, emailDir, onProgress, saveFn)
 	}()
 
 	if importErr == nil {
@@ -65,11 +70,12 @@ func Import(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error)
 	}
 
 	// Fallback to readpst when go-pst fails (e.g. newer OST formats, btree bugs).
+	// readpst always writes to local filesystem.
 	log.Printf("INFO: go-pst failed (%v), trying readpst fallback", importErr)
 	return importReadpst(pstPath, emailDir, onProgress)
 }
 
-func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, error) {
+func importGoPst(pstPath, emailDir string, onProgress ProgressFunc, saveFn SaveEmailFunc) (int, int, error) {
 	f, err := os.Open(pstPath)
 	if err != nil {
 		return 0, 0, fmt.Errorf("open PST: %w", err)
@@ -89,8 +95,10 @@ func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, e
 	if err := pstFile.WalkFolders(func(folder *pst.Folder) error {
 		folderPath := sanitizeFolderName(folder.Name)
 		dir := filepath.Join(emailDir, folderPath)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
+		if saveFn == nil {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
+			}
 		}
 
 		iter, err := folder.GetMessageIterator()
@@ -113,13 +121,19 @@ func importGoPst(pstPath, emailDir string, onProgress ProgressFunc) (int, int, e
 			filename := fmt.Sprintf("%s-%d.%s", checksum, extracted, ext)
 			path := filepath.Join(dir, filename)
 
-			if err := os.WriteFile(path, data, 0o644); err != nil {
+			if saveFn != nil {
+				if err := saveFn(path, data); err != nil {
+					log.Printf("WARN: write %s: %v", path, err)
+					errCount++
+					continue
+				}
+			} else if err := os.WriteFile(path, data, 0o644); err != nil {
 				log.Printf("WARN: write %s: %v", path, err)
 				errCount++
 				continue
 			}
 
-			if !date.IsZero() {
+			if saveFn == nil && !date.IsZero() {
 				os.Chtimes(path, date, date)
 			}
 

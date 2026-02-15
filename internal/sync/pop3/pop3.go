@@ -25,15 +25,19 @@ type SyncState interface {
 	MarkUIDSynced(accountID, folder, uid string) error
 }
 
+// SaveEmailFunc saves email data by full path. If nil, os.WriteFile is used.
+type SaveEmailFunc func(path string, data []byte) error
+
 // Sync downloads new emails from a POP3 account.
 // Uses SHA-256 hash deduplication since POP3 has no stable UIDs.
 // Returns (newMessages, error). NEVER deletes messages from the server.
 func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
-	return SyncWithContext(context.Background(), acct, emailDir, state)
+	return SyncWithContext(context.Background(), acct, emailDir, state, nil)
 }
 
 // SyncWithContext downloads new emails with cancellation support.
-func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
+// saveFn optionally stores emails (e.g. to S3). If nil, uses os.WriteFile.
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState, saveFn SaveEmailFunc) (int, error) {
 	port := acct.Port
 	if port == 0 {
 		if acct.SSL {
@@ -82,7 +86,9 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 	log.Printf("POP3: %d messages in mailbox", count)
 
 	inboxDir := filepath.Join(emailDir, "inbox")
-	os.MkdirAll(inboxDir, 0o755)
+	if saveFn == nil {
+		os.MkdirAll(inboxDir, 0o755)
+	}
 
 	totalNew := 0
 	for i := 1; i <= count; i++ {
@@ -110,12 +116,19 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 		filename := fmt.Sprintf("%s-%s.eml", checksum, msgHash)
 		path := filepath.Join(inboxDir, filename)
 
-		if err := os.WriteFile(path, raw, 0o644); err != nil {
+		if saveFn != nil {
+			if err := saveFn(path, raw); err != nil {
+				log.Printf("WARN: write %s: %v", path, err)
+				continue
+			}
+		} else if err := os.WriteFile(path, raw, 0o644); err != nil {
 			log.Printf("WARN: write %s: %v", path, err)
 			continue
 		}
 
-		setFileMtime(path, raw)
+		if saveFn == nil {
+			setFileMtime(path, raw)
+		}
 		state.MarkUIDSynced(acct.ID, "inbox", msgHash)
 		totalNew++
 	}

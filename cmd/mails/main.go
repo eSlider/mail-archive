@@ -19,6 +19,7 @@ import (
 
 	"github.com/eslider/mails/internal/account"
 	"github.com/eslider/mails/internal/auth"
+	"github.com/eslider/mails/internal/storage"
 	"github.com/eslider/mails/internal/sync"
 	"github.com/eslider/mails/internal/user"
 	"github.com/eslider/mails/internal/web"
@@ -74,7 +75,13 @@ Environment:
 
   QDRANT_URL          Qdrant gRPC address for similarity search
   OLLAMA_URL          Ollama API URL for embeddings
-  EMBED_MODEL         Ollama embedding model (default: all-minilm)`)
+  EMBED_MODEL         Ollama embedding model (default: all-minilm)
+
+  S3_ENDPOINT         S3-compatible storage (e.g. MinIO)
+  S3_ACCESS_KEY_ID    S3 access key
+  S3_SECRET_ACCESS_KEY S3 secret key
+  S3_BUCKET           S3 bucket (default: mails)
+  S3_USE_SSL          Use HTTPS for S3 (default: true)`)
 }
 
 func runServe() {
@@ -82,19 +89,24 @@ func runServe() {
 	dataDir := envOr("DATA_DIR", "./users")
 	baseURL := envOr("BASE_URL", "http://localhost:8090")
 
+	blobStore, err := storage.NewBlobStore(dataDir)
+	if err != nil {
+		log.Fatalf("Failed to init blob store: %v", err)
+	}
+
 	// Initialize stores.
-	userStore, err := user.NewStore(dataDir)
+	userStore, err := user.NewStore(dataDir, blobStore)
 	if err != nil {
 		log.Fatalf("Failed to init user store: %v", err)
 	}
 
-	sessionStore, err := auth.NewSessionStore(dataDir)
+	sessionStore, err := auth.NewSessionStore(dataDir, blobStore)
 	if err != nil {
 		log.Fatalf("Failed to init session store: %v", err)
 	}
 
-	accountStore := account.NewStore(dataDir)
-	syncService := sync.NewService(dataDir, accountStore)
+	accountStore := account.NewStore(dataDir, blobStore)
+	syncService := sync.NewService(dataDir, accountStore, blobStore)
 
 	// Configure OAuth providers.
 	var ghCfg, glCfg, fbCfg *auth.ProviderConfig
@@ -137,6 +149,7 @@ func runServe() {
 		Auth:       providers,
 		Sync:       syncService,
 		UsersDir:   dataDir,
+		BlobStore:  blobStore,
 		QdrantURL:  envOr("QDRANT_URL", ""),
 		OllamaURL:  envOr("OLLAMA_URL", ""),
 		EmbedModel: envOr("EMBED_MODEL", "all-minilm"),

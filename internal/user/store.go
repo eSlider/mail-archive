@@ -2,23 +2,27 @@
 package user
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/eslider/mails/internal/model"
+	"github.com/eslider/mails/internal/storage"
 )
 
 const userMetaFile = "user.json"
 
-// Store manages user data on the filesystem.
+// Store manages user data on the filesystem or S3.
 // Layout: {dataDir}/{userID}/user.json
 type Store struct {
-	mu      sync.RWMutex
-	dataDir string
+	mu        sync.RWMutex
+	dataDir   string
+	blobStore storage.BlobStore
 	// In-memory index: provider:providerID -> userID
 	providerIndex map[string]string
 	// In-memory index: email -> userID (for local auth)
@@ -27,14 +31,18 @@ type Store struct {
 	users map[string]model.User
 }
 
-// NewStore creates a user store, scanning existing users from disk.
-func NewStore(dataDir string) (*Store, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create users dir: %w", err)
+// NewStore creates a user store, scanning existing users from disk or S3.
+// blobStore may be nil to use local filesystem only.
+func NewStore(dataDir string, blobStore storage.BlobStore) (*Store, error) {
+	if blobStore == nil {
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			return nil, fmt.Errorf("create users dir: %w", err)
+		}
 	}
 
 	s := &Store{
 		dataDir:       dataDir,
+		blobStore:     blobStore,
 		providerIndex: make(map[string]string),
 		emailIndex:    make(map[string]string),
 		users:         make(map[string]model.User),
@@ -102,10 +110,12 @@ func (s *Store) CreateWithPassword(name, email, passwordHash string) (*model.Use
 		UpdatedAt:    now,
 	}
 
-	userDir := s.UserDir(user.ID)
-	for _, sub := range []string{"", "logs"} {
-		if err := os.MkdirAll(filepath.Join(userDir, sub), 0o755); err != nil {
-			return nil, fmt.Errorf("create user dir: %w", err)
+	if s.blobStore == nil {
+		userDir := s.UserDir(user.ID)
+		for _, sub := range []string{"", "logs"} {
+			if err := os.MkdirAll(filepath.Join(userDir, sub), 0o755); err != nil {
+				return nil, fmt.Errorf("create user dir: %w", err)
+			}
 		}
 	}
 
@@ -139,11 +149,12 @@ func (s *Store) create(oauthUser *model.User) (*model.User, error) {
 		UpdatedAt:  now,
 	}
 
-	userDir := s.UserDir(user.ID)
-	// Create user directory structure.
-	for _, sub := range []string{"", "logs"} {
-		if err := os.MkdirAll(filepath.Join(userDir, sub), 0o755); err != nil {
-			return nil, fmt.Errorf("create user dir: %w", err)
+	if s.blobStore == nil {
+		userDir := s.UserDir(user.ID)
+		for _, sub := range []string{"", "logs"} {
+			if err := os.MkdirAll(filepath.Join(userDir, sub), 0o755); err != nil {
+				return nil, fmt.Errorf("create user dir: %w", err)
+			}
 		}
 	}
 
@@ -207,11 +218,52 @@ func (s *Store) saveUser(u model.User) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(s.UserDir(u.ID), userMetaFile)
-	return os.WriteFile(path, data, 0o644)
+	key := u.ID + "/" + userMetaFile
+	if s.blobStore != nil {
+		return s.blobStore.Write(context.Background(), key, data)
+	}
+	return os.WriteFile(filepath.Join(s.UserDir(u.ID), userMetaFile), data, 0o644)
 }
 
 func (s *Store) loadAll() error {
+	ctx := context.Background()
+
+	if s.blobStore != nil {
+		keys, err := s.blobStore.List(ctx, "")
+		if err != nil {
+			return err
+		}
+		seen := make(map[string]bool)
+		for _, k := range keys {
+			parts := strings.SplitN(k, "/", 2)
+			if len(parts) < 2 || parts[1] != userMetaFile {
+				continue
+			}
+			userID := parts[0]
+			if seen[userID] {
+				continue
+			}
+			seen[userID] = true
+			data, err := s.blobStore.Read(ctx, k)
+			if err != nil {
+				continue
+			}
+			var f userFile
+			if err := json.Unmarshal(data, &f); err != nil {
+				continue
+			}
+			u := fromUserFile(f)
+			s.users[u.ID] = u
+			if u.Provider != "" && u.ProviderID != "" {
+				s.providerIndex[providerKey(u.Provider, u.ProviderID)] = u.ID
+			}
+			if u.Email != "" {
+				s.emailIndex[u.Email] = u.ID
+			}
+		}
+		return nil
+	}
+
 	entries, err := os.ReadDir(s.dataDir)
 	if err != nil {
 		if os.IsNotExist(err) {

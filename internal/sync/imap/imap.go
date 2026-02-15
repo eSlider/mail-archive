@@ -28,14 +28,18 @@ type SyncState interface {
 // ProgressFunc is called with human-readable progress updates during sync.
 type ProgressFunc func(msg string)
 
+// SaveEmailFunc saves email data by full path. If nil, os.WriteFile is used.
+type SaveEmailFunc func(path string, data []byte) error
+
 // Sync downloads new emails from an IMAP account.
 // Returns (newMessages, error). NEVER deletes or marks messages on the server.
 func Sync(acct model.EmailAccount, emailDir string, state SyncState) (int, error) {
-	return SyncWithContext(context.Background(), acct, emailDir, state, nil)
+	return SyncWithContext(context.Background(), acct, emailDir, state, nil, nil)
 }
 
 // SyncWithContext downloads new emails with cancellation and progress reporting.
-func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState, onProgress ProgressFunc) (int, error) {
+// saveFn optionally stores emails (e.g. to S3). If nil, uses os.WriteFile.
+func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir string, state SyncState, onProgress ProgressFunc, saveFn SaveEmailFunc) (int, error) {
 	if onProgress == nil {
 		onProgress = func(string) {}
 	}
@@ -85,7 +89,7 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 		}
 
 		onProgress(fmt.Sprintf("folder %d/%d: %s", fi+1, len(folders), folder))
-		n, err := syncFolderWithContext(ctx, client, acct, folder, emailDir, state)
+		n, err := syncFolderWithContext(ctx, client, acct, folder, emailDir, state, saveFn)
 		if err != nil {
 			if ctx.Err() != nil {
 				return totalNew, ctx.Err()
@@ -102,11 +106,13 @@ func SyncWithContext(ctx context.Context, acct model.EmailAccount, emailDir stri
 
 const fetchBatchSize = 50
 
-func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState) (int, error) {
+func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.EmailAccount, folder, emailDir string, state SyncState, saveFn SaveEmailFunc) (int, error) {
 	folderPath := imapFolderToPath(folder)
 	dir := filepath.Join(emailDir, folderPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return 0, err
+	if saveFn == nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return 0, err
+		}
 	}
 
 	uids, err := client.selectAndSearch(folder)
@@ -153,7 +159,7 @@ func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.E
 					log.Printf("WARN: fetch UID %d: %v", uid, err)
 					continue
 				}
-				if saveEmail(dir, uid, raw, acct.ID, folder, state) {
+				if saveEmail(dir, uid, raw, acct.ID, folder, state, saveFn) {
 					newCount++
 				}
 			}
@@ -161,7 +167,7 @@ func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.E
 		}
 
 		for uid, raw := range messages {
-			if saveEmail(dir, uid, raw, acct.ID, folder, state) {
+			if saveEmail(dir, uid, raw, acct.ID, folder, state, saveFn) {
 				newCount++
 			}
 		}
@@ -170,7 +176,7 @@ func syncFolderWithContext(ctx context.Context, client *imapClient, acct model.E
 	return newCount, nil
 }
 
-func saveEmail(dir string, uid int, raw []byte, accountID, folder string, state SyncState) bool {
+func saveEmail(dir string, uid int, raw []byte, accountID, folder string, state SyncState, saveFn SaveEmailFunc) bool {
 	if len(raw) == 0 {
 		return false
 	}
@@ -178,12 +184,19 @@ func saveEmail(dir string, uid int, raw []byte, accountID, folder string, state 
 	filename := fmt.Sprintf("%s-%d.eml", checksum, uid)
 	path := filepath.Join(dir, filename)
 
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
+	if saveFn != nil {
+		if err := saveFn(path, raw); err != nil {
+			log.Printf("WARN: write %s: %v", path, err)
+			return false
+		}
+	} else if err := os.WriteFile(path, raw, 0o644); err != nil {
 		log.Printf("WARN: write %s: %v", path, err)
 		return false
 	}
 
-	setFileMtime(path, raw)
+	if saveFn == nil {
+		setFileMtime(path, raw)
+	}
 	state.MarkUIDSynced(accountID, folder, fmt.Sprintf("%d", uid))
 	return true
 }

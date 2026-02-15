@@ -11,6 +11,7 @@ mails/
 ├── cmd/mails/           # Application entry point
 ├── internal/            # Private application packages
 │   ├── auth/            # OAuth2 login (GitHub, Google, Facebook)
+│   ├── storage/         # Blob store (FS or S3) for user data
 │   ├── user/            # User management, UUIDv7 IDs
 │   ├── account/         # Per-user email account CRUD
 │   ├── model/           # Shared data types
@@ -20,7 +21,7 @@ mails/
 │   │   ├── gmail/       # Gmail API sync
 │   │   └── pst/         # PST/OST file import (go-pst library)
 │   ├── search/
-│   │   ├── eml/         # .eml file parser
+│   │   ├── eml/         # .eml file parser, CID inline image extraction
 │   │   ├── index/       # DuckDB + Parquet index
 │   │   └── vector/      # Qdrant similarity search
 │   └── web/             # HTTP router, handlers, middleware
@@ -51,14 +52,15 @@ mails/
 Packages follow a strict dependency hierarchy to avoid import cycles:
 
 ```
-cmd → internal/web → internal/sync → internal/model
-                   → internal/auth
+cmd → internal/web → internal/sync   → internal/model
+                   → internal/auth   → internal/storage
                    → internal/user
                    → internal/account
                    → internal/search
 ```
 
-- Left packages may depend on right packages
+- Left packages may depend on right packages.
+- `internal/storage` (BlobStore) is used by auth, user, account, sync, and search for FS or S3-backed user data.
 - Right packages **MUST NOT** depend on left packages
 - Sub-packages at the same level use interfaces to avoid circular imports
 
@@ -121,9 +123,18 @@ go test -race ./...
 
 # Run specific package tests
 go test ./internal/search/eml/
+
+# Run e2e tests (requires GreenMail + Qdrant + Ollama)
+docker compose --profile test up -d greenmail
+go test -tags e2e -v ./tests/e2e/
+
+# Run S3 storage integration tests (requires MinIO)
+docker compose --profile s3 up -d minio
+S3_ENDPOINT=http://localhost:9900 S3_ACCESS_KEY_ID=minioadmin S3_SECRET_ACCESS_KEY=minioadmin \
+  S3_BUCKET=mails-test S3_USE_SSL=false go test -v ./internal/storage/
 ```
 
-Use `testing.T` and table-driven tests. Mock external services (IMAP, POP3, APIs).
+Use `testing.T` and table-driven tests. Mock external services (IMAP, POP3, APIs). Integration tests skip when required services (S3, GreenMail) are unavailable.
 
 ## Templates (Gitea-style)
 
@@ -225,16 +236,17 @@ Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsg
 
 ## User Data Layout
 
-Each user's data lives under `users/{uuidv7}/`:
+Each user's data lives under `users/{uuidv7}/`. When S3 env vars are set (`S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`), the following are stored in S3; otherwise on the local filesystem:
 
-| Path                             | Purpose                               |
-| -------------------------------- | ------------------------------------- |
-| `user.json`                      | User metadata (name, email, provider) |
-| `accounts.yml`                   | Email account configurations          |
-| `sync.sqlite`                    | Sync jobs, UIDs, state                |
-| `logs/{job-id}.jsonl`            | Structured sync logs                  |
-| `{domain}/{local}/`              | Downloaded .eml files                 |
-| `{domain}/{local}/index.parquet` | Search index per account              |
+| Path                             | Purpose                               | Storage      |
+| -------------------------------- | ------------------------------------- | ------------ |
+| `user.json`                      | User metadata (name, email, provider) | FS or S3     |
+| `accounts.yml`                   | Email account configurations          | FS or S3     |
+| `sessions.json`                 | Session store (root of users dir)     | FS or S3     |
+| `sync.sqlite`                    | Sync jobs, UIDs, state                | Local only   |
+| `logs/{job-id}.jsonl`            | Structured sync logs                  | Local only   |
+| `{domain}/{local}/*.eml`         | Downloaded .eml files                 | FS or S3     |
+| `{domain}/{local}/index.parquet` | Search index per account              | Local only   |
 
 ### Email Storage
 
@@ -266,11 +278,19 @@ See [docs/DOCKER.md](docs/DOCKER.md) for tini, runtime dependencies, and build d
 # Development
 docker compose up
 
+# With S3 (MinIO) for user data storage
+docker compose --profile s3 up -d minio
+export S3_ENDPOINT=http://localhost:9900 S3_ACCESS_KEY_ID=minioadmin S3_SECRET_ACCESS_KEY=minioadmin
+docker compose up
+
 # Production build
 docker compose -f docker-compose.yml up -d
 
 # Run tests
 docker compose run --rm mails go test ./...
+
+# Run e2e tests (GreenMail for IMAP/POP3)
+docker compose --profile test up -d greenmail
 ```
 
 ## API Reference
@@ -337,3 +357,4 @@ All API endpoints require authentication (session cookie or `Authorization: Bear
 - **IMAP connection refused:** Check host, port, and SSL settings. Gmail requires an App Password (not regular password).
 - **Search returns 0 results:** Run reindex after syncing new emails.
 - **SQLite busy:** Increase `_busy_timeout` or reduce concurrent sync jobs.
+- **S3/MinIO connection failed:** When using MinIO, set `S3_USE_SSL=false` and ensure `S3_ENDPOINT` includes the scheme (e.g. `http://localhost:9900`). Run MinIO with `docker compose --profile s3 up minio`.

@@ -2,6 +2,8 @@
 package account
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/eslider/mails/internal/model"
+	"github.com/eslider/mails/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 
@@ -16,13 +19,14 @@ const accountsFileName = "accounts.yml"
 
 // Store manages email account configurations per user.
 type Store struct {
-	mu       sync.RWMutex
-	usersDir string
+	mu        sync.RWMutex
+	usersDir  string
+	blobStore storage.BlobStore
 }
 
-// NewStore creates an account store.
-func NewStore(usersDir string) *Store {
-	return &Store{usersDir: usersDir}
+// NewStore creates an account store. blobStore may be nil to use local filesystem.
+func NewStore(usersDir string, blobStore storage.BlobStore) *Store {
+	return &Store{usersDir: usersDir, blobStore: blobStore}
 }
 
 // List returns all email accounts for a user.
@@ -69,9 +73,11 @@ func (s *Store) Create(userID string, acct model.EmailAccount) (*model.EmailAcco
 		return nil, err
 	}
 
-	// Create the email storage directory.
-	emailDir := EmailDir(s.usersDir, userID, acct)
-	os.MkdirAll(emailDir, 0o755)
+	// Create the email storage directory (for local fs; S3 has no dirs).
+	if s.blobStore == nil {
+		emailDir := EmailDir(s.usersDir, userID, acct)
+		os.MkdirAll(emailDir, 0o755)
+	}
 
 	return &acct, nil
 }
@@ -143,6 +149,21 @@ func (s *Store) accountsPath(userID string) string {
 }
 
 func (s *Store) load(userID string) ([]model.EmailAccount, error) {
+	key := userID + "/" + accountsFileName
+	if s.blobStore != nil {
+		data, err := s.blobStore.Read(context.Background(), key)
+		if err != nil {
+			if errors.Is(err, storage.ErrNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		var file model.AccountsFile
+		if err := yaml.Unmarshal(data, &file); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", key, err)
+		}
+		return file.Accounts, nil
+	}
 	path := s.accountsPath(userID)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -160,14 +181,17 @@ func (s *Store) load(userID string) ([]model.EmailAccount, error) {
 }
 
 func (s *Store) save(userID string, accounts []model.EmailAccount) error {
-	path := s.accountsPath(userID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-
 	file := model.AccountsFile{Accounts: accounts}
 	data, err := yaml.Marshal(file)
 	if err != nil {
+		return err
+	}
+	key := userID + "/" + accountsFileName
+	if s.blobStore != nil {
+		return s.blobStore.Write(context.Background(), key, data)
+	}
+	path := s.accountsPath(userID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
