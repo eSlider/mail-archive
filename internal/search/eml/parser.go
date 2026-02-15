@@ -485,8 +485,8 @@ func ParseFileFullFromBytes(path string, data []byte) (FullEmail, error) {
 		To:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("To")))),
 		CC:      ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Cc")))),
 		ReplyTo: ensureUTF8(strings.TrimSpace(decodeHeader(h.Get("Reply-To")))),
-		Date:   date,
-		Size:   int64(len(data)),
+		Date:    date,
+		Size:    int64(len(data)),
 	}
 	ct := h.Get("Content-Type")
 	cte := h.Get("Content-Transfer-Encoding")

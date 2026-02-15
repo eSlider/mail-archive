@@ -44,8 +44,8 @@ func NewStore(dataDir string, blobStore storage.BlobStore) (*Store, error) {
 		dataDir:       dataDir,
 		blobStore:     blobStore,
 		providerIndex: make(map[string]string),
-		emailIndex:   make(map[string]string),
-		users:        make(map[string]model.User),
+		emailIndex:    make(map[string]string),
+		users:         make(map[string]model.User),
 	}
 
 	if err := s.loadAll(); err != nil {

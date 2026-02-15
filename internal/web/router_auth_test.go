@@ -13,21 +13,22 @@ import (
 
 func TestProtectedRoutesRequireAuth(t *testing.T) {
 	dir := t.TempDir()
-	sessions, err := auth.NewSessionStore(dir)
+	sessions, err := auth.NewSessionStore(dir, nil)
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
-	users, err := user.NewStore(dir)
+	users, err := user.NewStore(dir, nil)
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 	os.MkdirAll(dir, 0755)
 
 	cfg := Config{
-		Users:    users,
-		Accounts: account.NewStore(dir),
-		Sessions: sessions,
-		UsersDir: dir,
+		Users:     users,
+		Accounts:  account.NewStore(dir, nil),
+		Sessions:  sessions,
+		UsersDir:  dir,
+		BlobStore: nil,
 	}
 	handler := NewRouter(cfg)
 
