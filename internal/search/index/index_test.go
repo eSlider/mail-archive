@@ -337,7 +337,7 @@ func TestSearchMultiDeduplicatesByChecksum(t *testing.T) {
 	if err := os.MkdirAll(inbox2, 0755); err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(inbox2, "a1b2c3d4e5f60001-1.eml"), []byte(eml1), 0644) // same checksum
+	os.WriteFile(filepath.Join(inbox2, "a1b2c3d4e5f60001-1.eml"), []byte(eml1), 0644)  // same checksum
 	os.WriteFile(filepath.Join(inbox2, "bbbb111122223333-99.eml"), []byte(eml2), 0644) // same checksum
 
 	parquet1 := filepath.Join(root, "idx1.parquet")
