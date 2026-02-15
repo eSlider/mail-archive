@@ -1,20 +1,22 @@
 // Mail Archive — minimal service worker for PWA installability
 // Caches static assets for offline shell; API calls remain network-first.
 
-const CACHE_NAME = 'mail-archive-v1';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'mail-archive-v2';
+const STATIC_PRECACHE = [
   '/',
   '/static/css/app.css',
   '/static/favicon.svg',
   '/manifest.webmanifest',
   '/static/js/vendor/vue-3.5.13.global.prod.js',
-  '/static/js/app/main.js',
-  '/static/js/app/main.template.vue'
+  '/static/js/app/main.js'
 ];
+// Vue *.template.vue files are cached on first fetch via /static/ prefix
+const CACHE_EXACT = ['/', '/login', '/register'];
+const CACHE_PREFIXES = ['/static/'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_PRECACHE))
       .then(() => self.skipWaiting())
   );
 });
@@ -34,8 +36,9 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/') || request.method !== 'GET') {
     return;
   }
-  // Static assets: cache-first
-  if (url.pathname.startsWith('/static/') || url.pathname === '/' || url.pathname === '/login' || url.pathname === '/register') {
+  const shouldCache = CACHE_EXACT.includes(url.pathname) ||
+    CACHE_PREFIXES.some((p) => url.pathname.startsWith(p));
+  if (shouldCache) {
     event.respondWith(
       caches.match(request).then((cached) => cached || fetch(request))
     );

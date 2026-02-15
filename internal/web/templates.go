@@ -16,10 +16,10 @@ import (
 var templatesFS embed.FS
 
 var (
-	templatesMu   sync.RWMutex
-	loginTmpl     *template.Template
-	registerTmpl  *template.Template
-	dashboardHTML []byte
+	templatesMu  sync.RWMutex
+	loginTmpl    *template.Template
+	registerTmpl *template.Template
+	dashboardTmpl *template.Template
 )
 
 func init() {
@@ -27,13 +27,17 @@ func init() {
 }
 
 func loadEmbeddedTemplates() {
-	loginData, _ := templatesFS.ReadFile("templates/auth/login.tmpl")
-	registerData, _ := templatesFS.ReadFile("templates/auth/register.tmpl")
-	dashboardData, _ := templatesFS.ReadFile("templates/dashboard.tmpl")
+	pwaData, _ := templatesFS.ReadFile("templates/partials/pwa.tmpl")
+	base := template.Must(template.New("").Parse(string(pwaData)))
 
-	loginTmpl, _ = template.New("login").Parse(string(loginData))
-	registerTmpl, _ = template.New("register").Parse(string(registerData))
-	dashboardHTML = dashboardData
+	loginData, _ := templatesFS.ReadFile("templates/auth/login.tmpl")
+	loginTmpl = template.Must(template.Must(base.Clone()).Parse(string(loginData)))
+
+	registerData, _ := templatesFS.ReadFile("templates/auth/register.tmpl")
+	registerTmpl = template.Must(template.Must(base.Clone()).Parse(string(registerData)))
+
+	dashboardData, _ := templatesFS.ReadFile("templates/dashboard.tmpl")
+	dashboardTmpl = template.Must(template.Must(base.Clone()).Parse(string(dashboardData)))
 }
 
 // renderLogin executes the login template with the given error (empty string for no error).
@@ -61,13 +65,12 @@ func renderRegister(w io.Writer, errMsg string) error {
 // renderDashboard writes the dashboard HTML (no template vars).
 func renderDashboard(w io.Writer) error {
 	templatesMu.RLock()
-	data := dashboardHTML
+	t := dashboardTmpl
 	templatesMu.RUnlock()
-	if len(data) == 0 {
+	if t == nil {
 		return nil
 	}
-	_, err := w.Write(data)
-	return err
+	return t.Execute(w, nil)
 }
 
 // ReloadTemplates loads templates from TemplateDir if set, otherwise keeps embedded.
@@ -77,26 +80,32 @@ func ReloadTemplates() {
 	defer templatesMu.Unlock()
 
 	if TemplateDir == "" {
+		pwaData, _ := templatesFS.ReadFile("templates/partials/pwa.tmpl")
+		base := template.Must(template.New("").Parse(string(pwaData)))
 		loginData, _ := templatesFS.ReadFile("templates/auth/login.tmpl")
 		registerData, _ := templatesFS.ReadFile("templates/auth/register.tmpl")
 		dashboardData, _ := templatesFS.ReadFile("templates/dashboard.tmpl")
-		loginTmpl, _ = template.New("login").Parse(string(loginData))
-		registerTmpl, _ = template.New("register").Parse(string(registerData))
-		dashboardHTML = dashboardData
+		loginTmpl = template.Must(template.Must(base.Clone()).Parse(string(loginData)))
+		registerTmpl = template.Must(template.Must(base.Clone()).Parse(string(registerData)))
+		dashboardTmpl = template.Must(template.Must(base.Clone()).Parse(string(dashboardData)))
 		return
 	}
 
+	pwaPath := filepath.Join(TemplateDir, "partials", "pwa.tmpl")
 	loginPath := filepath.Join(TemplateDir, "auth", "login.tmpl")
 	registerPath := filepath.Join(TemplateDir, "auth", "register.tmpl")
 	dashboardPath := filepath.Join(TemplateDir, "dashboard.tmpl")
 
-	if d, err := os.ReadFile(loginPath); err == nil {
-		loginTmpl, _ = template.New("login").Parse(string(d))
-	}
-	if d, err := os.ReadFile(registerPath); err == nil {
-		registerTmpl, _ = template.New("register").Parse(string(d))
-	}
-	if d, err := os.ReadFile(dashboardPath); err == nil {
-		dashboardHTML = d
+	if pwaData, err := os.ReadFile(pwaPath); err == nil {
+		base := template.Must(template.New("").Parse(string(pwaData)))
+		if d, err := os.ReadFile(loginPath); err == nil {
+			loginTmpl = template.Must(template.Must(base.Clone()).Parse(string(d)))
+		}
+		if d, err := os.ReadFile(registerPath); err == nil {
+			registerTmpl = template.Must(template.Must(base.Clone()).Parse(string(d)))
+		}
+		if d, err := os.ReadFile(dashboardPath); err == nil {
+			dashboardTmpl = template.Must(template.Must(base.Clone()).Parse(string(d)))
+		}
 	}
 }
