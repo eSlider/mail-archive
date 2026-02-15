@@ -375,8 +375,8 @@ func TestSearchMultiDeduplicatesByChecksum(t *testing.T) {
 }
 
 func TestSearchMultiKeepsAllWhenNoChecksumInPath(t *testing.T) {
-	// Paths without checksum format (e.g. readpst output "message_1.eml") must not be collapsed.
-	// regexp_extract returns empty/NULL -> we use account||path, so each row stays unique.
+	// Paths without checksum format: content fingerprint used for dedup.
+	// Single account with 3 different emails -> 3 results.
 	root := t.TempDir()
 
 	dir := filepath.Join(root, "readpst-style")
@@ -400,6 +400,41 @@ func TestSearchMultiKeepsAllWhenNoChecksumInPath(t *testing.T) {
 	result := index.SearchMulti(accounts, "", 0, 100)
 
 	if result.Total != 3 {
-		t.Errorf("SearchMulti total = %d, want 3 (all kept when no checksum in path)", result.Total)
+		t.Errorf("SearchMulti total = %d, want 3", result.Total)
+	}
+}
+
+func TestSearchMultiDeduplicatesByContentWhenNoChecksumInPath(t *testing.T) {
+	// Two accounts (re-imported PST via readpst) with same emails -> content fingerprint dedupes.
+	root := t.TempDir()
+
+	eml1 := "From: a@b.com\r\nTo: c@d.com\r\nSubject: Same\r\nDate: Mon, 10 Feb 2025 12:00:00 +0000\r\n\r\nBody"
+	eml2 := "From: x@y.com\r\nTo: z@w.com\r\nSubject: Other\r\nDate: Tue, 11 Feb 2025 08:00:00 +0000\r\n\r\nDifferent"
+
+	for _, acc := range []string{"import-1", "import-2"} {
+		dir := filepath.Join(root, acc)
+		inbox := filepath.Join(dir, "inbox")
+		if err := os.MkdirAll(inbox, 0755); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(filepath.Join(inbox, "message_1.eml"), []byte(eml1), 0644)
+		os.WriteFile(filepath.Join(inbox, "message_2.eml"), []byte(eml2), 0644)
+	}
+
+	idx1, _ := index.New(filepath.Join(root, "import-1"), filepath.Join(root, "idx1.parquet"))
+	idx1.Build()
+	idx1.Close()
+	idx2, _ := index.New(filepath.Join(root, "import-2"), filepath.Join(root, "idx2.parquet"))
+	idx2.Build()
+	idx2.Close()
+
+	accounts := []index.AccountIndex{
+		{ID: "acct-1", IndexPath: filepath.Join(root, "idx1.parquet")},
+		{ID: "acct-2", IndexPath: filepath.Join(root, "idx2.parquet")},
+	}
+	result := index.SearchMulti(accounts, "", 0, 100)
+
+	if result.Total != 2 {
+		t.Errorf("SearchMulti total = %d, want 2 (deduplicated by content when no checksum in path)", result.Total)
 	}
 }
