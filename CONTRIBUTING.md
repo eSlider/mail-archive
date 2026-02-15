@@ -165,6 +165,7 @@ web/static/js/app/
 ```
 
 This approach gives you:
+
 - **IDE support** — `.vue` extension enables syntax highlighting, linting, and Emmet in editors
 - **Separation of concerns** — template markup is separate from JavaScript logic
 - **Zero tooling** — no compile/transpile step, works directly in the browser
@@ -173,9 +174,9 @@ This approach gives you:
 To add a new component, create a `component-name.template.vue` file and load it the same way:
 
 ```javascript
-var res = await fetch('/static/js/app/component-name.template.vue');
-var ComponentDef = { template: await res.text(), /* data, methods... */ };
-app.component('component-name', ComponentDef);
+var res = await fetch("/static/js/app/component-name.template.vue");
+var ComponentDef = { template: await res.text() /* data, methods... */ };
+app.component("component-name", ComponentDef);
 ```
 
 ### Style Guide
@@ -220,14 +221,14 @@ Based on [Google JavaScript Style Guide](https://google.github.io/styleguide/jsg
 
 Each user's data lives under `users/{uuidv7}/`:
 
-| Path | Purpose |
-|------|---------|
-| `user.json` | User metadata (name, email, provider) |
-| `accounts.yml` | Email account configurations |
-| `sync.sqlite` | Sync jobs, UIDs, state |
-| `logs/{job-id}.jsonl` | Structured sync logs |
-| `{domain}/{local}/` | Downloaded .eml files |
-| `{domain}/{local}/index.parquet` | Search index per account |
+| Path                             | Purpose                               |
+| -------------------------------- | ------------------------------------- |
+| `user.json`                      | User metadata (name, email, provider) |
+| `accounts.yml`                   | Email account configurations          |
+| `sync.sqlite`                    | Sync jobs, UIDs, state                |
+| `logs/{job-id}.jsonl`            | Structured sync logs                  |
+| `{domain}/{local}/`              | Downloaded .eml files                 |
+| `{domain}/{local}/index.parquet` | Search index per account              |
 
 ### Email Storage
 
@@ -261,57 +262,57 @@ All API endpoints require authentication (session cookie or `Authorization: Bear
 
 ### Auth
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/login` | Login page |
-| GET | `/auth/{provider}` | Start OAuth flow |
-| GET | `/auth/{provider}/callback` | OAuth callback |
-| POST | `/logout` | End session |
+| Method | Path                        | Description      |
+| ------ | --------------------------- | ---------------- |
+| GET    | `/login`                    | Login page       |
+| GET    | `/auth/{provider}`          | Start OAuth flow |
+| GET    | `/auth/{provider}/callback` | OAuth callback   |
+| POST   | `/logout`                   | End session      |
 
 ### User
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/me` | Current user info |
+| Method | Path      | Description       |
+| ------ | --------- | ----------------- |
+| GET    | `/api/me` | Current user info |
 
 ### Accounts
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/accounts` | List email accounts |
-| POST | `/api/accounts` | Add new account |
-| PUT | `/api/accounts/{id}` | Update account |
-| DELETE | `/api/accounts/{id}` | Remove account |
+| Method | Path                 | Description         |
+| ------ | -------------------- | ------------------- |
+| GET    | `/api/accounts`      | List email accounts |
+| POST   | `/api/accounts`      | Add new account     |
+| PUT    | `/api/accounts/{id}` | Update account      |
+| DELETE | `/api/accounts/{id}` | Remove account      |
 
 ### Sync
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/sync` | Trigger sync (all or specific account) |
-| POST | `/api/sync/stop` | Cancel a running sync (requires `account_id`) |
-| GET | `/api/sync/status` | Sync status per account (progress, errors) |
+| Method | Path               | Description                                   |
+| ------ | ------------------ | --------------------------------------------- |
+| POST   | `/api/sync`        | Trigger sync (all or specific account)        |
+| POST   | `/api/sync/stop`   | Cancel a running sync (requires `account_id`) |
+| GET    | `/api/sync/status` | Sync status per account (progress, errors)    |
 
 ### Import
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/import/pst` | Upload and import PST/OST file (multipart) |
-| GET | `/api/import/status/{id}` | Import job progress (phase, count) |
+| Method | Path                      | Description                                |
+| ------ | ------------------------- | ------------------------------------------ |
+| POST   | `/api/import/pst`         | Upload and import PST/OST file (multipart) |
+| GET    | `/api/import/status/{id}` | Import job progress (phase, count)         |
 
 ### Search
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/search?q=&limit=&offset=&mode=` | Search emails |
-| GET | `/api/email?path=` | Get single email detail |
-| GET | `/api/stats` | Index statistics |
-| POST | `/api/reindex` | Rebuild search index |
+| Method | Path                                  | Description             |
+| ------ | ------------------------------------- | ----------------------- |
+| GET    | `/api/search?q=&limit=&offset=&mode=` | Search emails           |
+| GET    | `/api/email?path=`                    | Get single email detail |
+| GET    | `/api/stats`                          | Index statistics        |
+| POST   | `/api/reindex`                        | Rebuild search index    |
 
 ### Health
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/health` | Health check (no auth required) |
+| Method | Path      | Description                     |
+| ------ | --------- | ------------------------------- |
+| GET    | `/health` | Health check (no auth required) |
 
 ## Common Issues
 

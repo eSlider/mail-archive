@@ -55,20 +55,20 @@ docker pull ghcr.io/eslider/mail-archive:v1.0.1
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LISTEN_ADDR` | `:8090` | HTTP listen address |
-| `DATA_DIR` | `./users` | Base directory for user data |
-| `BASE_URL` | `http://localhost:8090` | Public URL for OAuth callbacks |
-| `GITHUB_CLIENT_ID` | — | GitHub OAuth app client ID |
-| `GITHUB_CLIENT_SECRET` | — | GitHub OAuth app client secret |
-| `GOOGLE_CLIENT_ID` | — | Google OAuth app client ID |
-| `GOOGLE_CLIENT_SECRET` | — | Google OAuth app client secret |
-| `FACEBOOK_CLIENT_ID` | — | Facebook OAuth app client ID |
-| `FACEBOOK_CLIENT_SECRET` | — | Facebook OAuth app client secret |
-| `QDRANT_URL` | — | Qdrant gRPC address for similarity search |
-| `OLLAMA_URL` | — | Ollama API URL for embeddings |
-| `EMBED_MODEL` | `all-minilm` | Embedding model name |
+| Variable                 | Default                 | Description                               |
+| ------------------------ | ----------------------- | ----------------------------------------- |
+| `LISTEN_ADDR`            | `:8090`                 | HTTP listen address                       |
+| `DATA_DIR`               | `./users`               | Base directory for user data              |
+| `BASE_URL`               | `http://localhost:8090` | Public URL for OAuth callbacks            |
+| `GITHUB_CLIENT_ID`       | —                       | GitHub OAuth app client ID                |
+| `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth app client secret            |
+| `GOOGLE_CLIENT_ID`       | —                       | Google OAuth app client ID                |
+| `GOOGLE_CLIENT_SECRET`   | —                       | Google OAuth app client secret            |
+| `FACEBOOK_CLIENT_ID`     | —                       | Facebook OAuth app client ID              |
+| `FACEBOOK_CLIENT_SECRET` | —                       | Facebook OAuth app client secret          |
+| `QDRANT_URL`             | —                       | Qdrant gRPC address for similarity search |
+| `OLLAMA_URL`             | —                       | Ollama API URL for embeddings             |
+| `EMBED_MODEL`            | `all-minilm`            | Embedding model name                      |
 
 ### OAuth Setup (Optional)
 
@@ -149,16 +149,16 @@ docker compose watch
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Backend | Go 1.24+ |
-| Frontend | Vue.js 3.5, native fetch (no build step, no CDN) |
-| Search index | DuckDB (in-memory) + Parquet (persistence) |
-| Vector search | Qdrant + Ollama embeddings |
-| Sync state | SQLite (per-user) |
-| Auth | bcrypt passwords, optional OAuth2 |
-| Container | Docker + Docker Compose |
-| License | MIT |
+| Component     | Technology                                       |
+| ------------- | ------------------------------------------------ |
+| Backend       | Go 1.24+                                         |
+| Frontend      | Vue.js 3.5, native fetch (no build step, no CDN) |
+| Search index  | DuckDB (in-memory) + Parquet (persistence)       |
+| Vector search | Qdrant + Ollama embeddings                       |
+| Sync state    | SQLite (per-user)                                |
+| Auth          | bcrypt passwords, optional OAuth2                |
+| Container     | Docker + Docker Compose                          |
+| License       | MIT                                              |
 
 ## Frontend
 
@@ -183,16 +183,22 @@ Vue templates are stored as standalone `.vue` files containing raw HTML with Vue
 ```javascript
 // main.js — async bootstrap
 (async function () {
-  var res = await fetch('/static/js/app/main.template.vue');
+  var res = await fetch("/static/js/app/main.template.vue");
   var template = await res.text();
 
   var App = {
     template: template,
-    data: function () { return { /* ... */ } },
-    methods: { /* ... */ }
+    data: function () {
+      return {
+        /* ... */
+      };
+    },
+    methods: {
+      /* ... */
+    },
   };
 
-  Vue.createApp(App).mount('#app');
+  Vue.createApp(App).mount("#app");
 })();
 ```
 
