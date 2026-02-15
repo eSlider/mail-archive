@@ -6,7 +6,7 @@
 
 Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem.
 
-**Summary:** Central email hub for multiple accounts. Syncs from IMAP, POP3, Gmail into per-user `.eml` storage with DuckDB/Parquet search and optional vector search (Qdrant + Ollama). Read-only sync, no deletions. See [Competitors](docs/competitors.md) for similar OSS projects.
+See [Competitors](docs/competitors.md) for similar OSS projects.
 
 ## Purpose
 
@@ -16,7 +16,7 @@ Central hub for all email. Aggregates messages from every source into structured
 
 - [x] **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
 - [x] **Multi-account** — each user manages their own email accounts
-- [x] **Protocol support** — IMAP, POP3, Gmail API (not yet fully)
+- [x] **Protocol support** — IMAP, POP3, Gmail API (OAuth flow incomplete)
 - [x] **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
 - [x] **Deduplication** — SHA-256 content checksums prevent duplicate storage
 - [x] **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
@@ -30,7 +30,7 @@ Central hub for all email. Aggregates messages from every source into structured
 - [x] **PWA** — installable on desktop and mobile (standalone app, offline shell for static assets)
 
 > [!NOTE]
-> **The service **never** deletes or marks emails as read.**
+> The service **never** deletes or marks emails as read.
 
 ## Quick Start
 
@@ -65,25 +65,25 @@ docker pull ghcr.io/eslider/mail-archive:v1.0.1
 
 ### Environment Variables
 
-| Variable                 | Default                 | Description                               |
-| ------------------------ | ----------------------- | ----------------------------------------- |
-| `LISTEN_ADDR`            | `:8090`                 | HTTP listen address                       |
-| `DATA_DIR`               | `./users`               | Base directory for user data              |
-| `BASE_URL`               | `http://localhost:8090` | Public URL for OAuth callbacks            |
-| `GITHUB_CLIENT_ID`       | —                       | GitHub OAuth app client ID                |
-| `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth app client secret            |
-| `GOOGLE_CLIENT_ID`       | —                       | Google OAuth app client ID                |
-| `GOOGLE_CLIENT_SECRET`   | —                       | Google OAuth app client secret            |
-| `FACEBOOK_CLIENT_ID`     | —                       | Facebook OAuth app client ID              |
-| `FACEBOOK_CLIENT_SECRET` | —                       | Facebook OAuth app client secret          |
-| `QDRANT_URL`             | —                       | Qdrant gRPC address for similarity search |
-| `OLLAMA_URL`             | —                       | Ollama API URL for embeddings             |
-| `EMBED_MODEL`            | `all-minilm`            | Embedding model name                      |
+| Variable                 | Default                 | Description                                 |
+| ------------------------ | ----------------------- | ------------------------------------------- |
+| `LISTEN_ADDR`            | `:8090`                 | HTTP listen address                         |
+| `DATA_DIR`               | `./users`               | Base directory for user data                |
+| `BASE_URL`               | `http://localhost:8090` | Public URL for OAuth callbacks              |
+| `GITHUB_CLIENT_ID`       | —                       | GitHub OAuth app client ID                  |
+| `GITHUB_CLIENT_SECRET`   | —                       | GitHub OAuth app client secret              |
+| `GOOGLE_CLIENT_ID`       | —                       | Google OAuth app client ID                  |
+| `GOOGLE_CLIENT_SECRET`   | —                       | Google OAuth app client secret              |
+| `FACEBOOK_CLIENT_ID`     | —                       | Facebook OAuth app client ID                |
+| `FACEBOOK_CLIENT_SECRET` | —                       | Facebook OAuth app client secret            |
+| `QDRANT_URL`             | —                       | Qdrant gRPC address for similarity search   |
+| `OLLAMA_URL`             | —                       | Ollama API URL for embeddings               |
+| `EMBED_MODEL`            | `all-minilm`            | Embedding model name                        |
 | `S3_ENDPOINT`            | —                       | S3-compatible storage endpoint (e.g. MinIO) |
-| `S3_ACCESS_KEY_ID`       | —                       | S3 access key                             |
-| `S3_SECRET_ACCESS_KEY`   | —                       | S3 secret key                             |
-| `S3_BUCKET`              | `mails`                 | S3 bucket name                            |
-| `S3_USE_SSL`             | `true`                  | Use HTTPS for S3 endpoint                 |
+| `S3_ACCESS_KEY_ID`       | —                       | S3 access key                               |
+| `S3_SECRET_ACCESS_KEY`   | —                       | S3 secret key                               |
+| `S3_BUCKET`              | `mails`                 | S3 bucket name                              |
+| `S3_USE_SSL`             | `true`                  | Use HTTPS for S3 endpoint                   |
 
 ### OAuth Setup (Optional)
 
@@ -288,15 +288,15 @@ curl -b cookies.txt http://localhost:8090/api/accounts
 curl -b cookies.txt -X POST http://localhost:8090/api/sync
 
 # Stop a running sync
-curl -b cookies.txt -X POST http://localhost:8090/api/sync/stop   -H 'Content-Type: application/json' -d '{"account_id":"..."}'
+curl -b cookies.txt -X POST http://localhost:8090/api/sync/stop -H 'Content-Type: application/json' -d '{"account_id":"..."}'
 
 # Import PST/OST file
-curl -b cookies.txt -X POST http://localhost:8090/api/import/pst   -F "file=@archive.pst" -F "title=My Outlook Archive"
-
-# For newer Outlook OST files, install pst-utils as fallback: apt install pst-utils
+curl -b cookies.txt -X POST http://localhost:8090/api/import/pst -F "file=@archive.pst" -F "title=My Outlook Archive"
 
 # Check import progress
 curl -b cookies.txt http://localhost:8090/api/import/status/{job_id}
+
+# For newer Outlook OST files, install pst-utils: apt install pst-utils
 ```
 
 ## License

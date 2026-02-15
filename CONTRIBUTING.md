@@ -2,7 +2,7 @@
 
 Guidelines for contributing to the Mail Archive project. Inspired by [Gitea's backend](https://docs.gitea.com/contributing/guidelines-backend) and [frontend](https://docs.gitea.com/contributing/guidelines-frontend) guidelines.
 
-> **AI agents:** See [AGENTS.md](AGENTS.md) for project context and next steps.
+> **AI agents:** See [AGENTS.md](AGENTS.md) for a brief overview and links to detailed docs.
 
 ## Architecture
 
