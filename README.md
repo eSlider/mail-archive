@@ -6,28 +6,28 @@
 
 Multi-user email archival system with search. Syncs emails from IMAP, POP3, and Gmail API accounts into a structured filesystem.
 
-> [!NOTE]
-> **The service **never** deletes or marks emails as read.**
-
 ## Purpose
 
 Central hub for all email. Aggregates messages from every source into structured storage (filesystem, S3). Unstructured mail becomes normalized data ready for downstream systems.
 
 ## Features
 
-- ✓ **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
-- ✓ **Multi-account** — each user manages their own email accounts
-- ✓ **Protocol support** — IMAP, POP3, Gmail API (not yet fully)
-- ✓ **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
-- ✓ **Deduplication** — SHA-256 content checksums prevent duplicate storage
-- ✓ **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
-- ✓ **Live sync** — cancel running syncs, real-time progress, auto-reindex every 5s
-- ✓ **Date preservation** — file mtime set from email Date/Received headers
-- ✓ **UUIDv7 IDs** — time-ordered identifiers for all entities
-- ✓ **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
-- ✓ **Per-user isolation** — all data under `users/{uuid}/`
-- ✓ **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
-- ✓ **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
+- [x] **Multi-user** — username/password registration (no email verification), optional OAuth2 (GitHub, Google, Facebook)
+- [x] **Multi-account** — each user manages their own email accounts
+- [x] **Protocol support** — IMAP, POP3, Gmail API (not yet fully)
+- [x] **PST/OST import** — upload Outlook archive files (10GB+), streamed with progress
+- [x] **Deduplication** — SHA-256 content checksums prevent duplicate storage
+- [x] **Search** — keyword search (DuckDB + Parquet) and similarity search (Qdrant + Ollama)
+- [x] **Live sync** — cancel running syncs, real-time progress, auto-reindex every 5s
+- [x] **Date preservation** — file mtime set from email Date/Received headers
+- [x] **UUIDv7 IDs** — time-ordered identifiers for all entities
+- [x] **Raw storage** — emails preserved as `.eml` files (RFC 822), readable by any mail client
+- [x] **Per-user isolation** — all data under `users/{uuid}/`
+- [x] **Mobile-first UI** — bottom nav, infinite scroll, swipe between emails
+- [x] **High-performance search results** — virtual list (viewport-only rendering), custom scroll bar, throttled scroll, CSS containment for smooth UX with 30k+ emails
+
+> [!NOTE]
+> **The service **never** deletes or marks emails as read.**
 
 ## Quick Start
 
