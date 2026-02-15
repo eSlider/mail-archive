@@ -586,6 +586,33 @@ func handleAttachmentDownload(cfg Config) http.HandlerFunc {
 	}
 }
 
+// handleCIDResource serves inline MIME parts by Content-ID. Protected by RequireAuth;
+// resolveEmailPath scopes access to the logged-in user's accounts only.
+func handleCIDResource(cfg Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		full, ok := resolveEmailPath(cfg, r)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "missing or invalid path")
+			return
+		}
+		cid := strings.TrimSpace(r.URL.Query().Get("cid"))
+		if cid == "" {
+			writeError(w, http.StatusBadRequest, "missing cid parameter")
+			return
+		}
+		data, contentType, err := eml.ExtractPartByCID(full, cid)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "resource not found")
+			return
+		}
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		w.Header().Set("Cache-Control", "private, max-age=3600")
+		w.Write(data)
+	}
+}
+
 func handleSearchStats(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := auth.UserIDFromContext(r.Context())
