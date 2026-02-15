@@ -16,9 +16,9 @@ import (
 var templatesFS embed.FS
 
 var (
-	templatesMu  sync.RWMutex
-	loginTmpl    *template.Template
-	registerTmpl *template.Template
+	templatesMu   sync.RWMutex
+	loginTmpl     *template.Template
+	registerTmpl  *template.Template
 	dashboardTmpl *template.Template
 )
 
