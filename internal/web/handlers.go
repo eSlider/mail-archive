@@ -586,6 +586,8 @@ func handleAttachmentDownload(cfg Config) http.HandlerFunc {
 	}
 }
 
+// handleCIDResource serves inline MIME parts by Content-ID. Protected by RequireAuth;
+// resolveEmailPath scopes access to the logged-in user's accounts only.
 func handleCIDResource(cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		full, ok := resolveEmailPath(cfg, r)
